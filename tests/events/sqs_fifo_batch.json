@@ -1,0 +1,64 @@
+{
+  "Records": [
+    {
+      "messageId": "aaaaaaaa-0001-0001-0001-000000000001",
+      "receiptHandle": "AQEBfifo1",
+      "body": "{\"type\": \"task\", \"task_id\": \"fifo-1\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1545082649183",
+        "SequenceNumber": "18849496460467696128",
+        "MessageGroupId": "group-A",
+        "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+        "MessageDeduplicationId": "dedup-1",
+        "ApproximateFirstReceiveTimestamp": "1545082649185",
+        "messageGroupId": "group-A"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "11111111111111111111111111111111",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue.fifo",
+      "awsRegion": "us-east-1"
+    },
+    {
+      "messageId": "aaaaaaaa-0002-0002-0002-000000000002",
+      "receiptHandle": "AQEBfifo2",
+      "body": "{\"type\": \"task\", \"task_id\": \"boom\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1545082649283",
+        "SequenceNumber": "18849496460467696129",
+        "MessageGroupId": "group-A",
+        "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+        "MessageDeduplicationId": "dedup-2",
+        "ApproximateFirstReceiveTimestamp": "1545082649285",
+        "messageGroupId": "group-A"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "22222222222222222222222222222222",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue.fifo",
+      "awsRegion": "us-east-1"
+    },
+    {
+      "messageId": "aaaaaaaa-0003-0003-0003-000000000003",
+      "receiptHandle": "AQEBfifo3",
+      "body": "{\"type\": \"task\", \"task_id\": \"fifo-3\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1545082649383",
+        "SequenceNumber": "18849496460467696130",
+        "MessageGroupId": "group-A",
+        "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+        "MessageDeduplicationId": "dedup-3",
+        "ApproximateFirstReceiveTimestamp": "1545082649385",
+        "messageGroupId": "group-A"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "33333333333333333333333333333333",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue.fifo",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}

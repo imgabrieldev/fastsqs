@@ -1,0 +1,36 @@
+{
+  "Records": [
+    {
+      "messageId": "11111111-1111-1111-1111-111111111111",
+      "receiptHandle": "AQEBwJnKyrHigUMZj6rYigCgxlaS3SLy0a",
+      "body": "{\"type\": \"task\", \"task_id\": \"ok-1\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1545082649183",
+        "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+        "ApproximateFirstReceiveTimestamp": "1545082649185"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "7b270e59b47ff90a553787216d55d91d",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue",
+      "awsRegion": "us-east-1"
+    },
+    {
+      "messageId": "22222222-2222-2222-2222-222222222222",
+      "receiptHandle": "AQEBzWwaftRI0KuVm4tP+/7q1rGgNqicHq",
+      "body": "{\"type\": \"task\", \"task_id\": \"boom\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1545082650636",
+        "SenderId": "AIDAIENQZJOLO23YVJ4VO",
+        "ApproximateFirstReceiveTimestamp": "1545082650649"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "9bb58f26192e4ba00f01e2e7b136bbd8",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:my-queue",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}

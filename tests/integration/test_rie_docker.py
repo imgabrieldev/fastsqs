@@ -109,3 +109,16 @@ def test_fifo_batch_halts_group(rie):
         "aaaaaaaa-0002-0002-0002-000000000002",  # boom
         "aaaaaaaa-0003-0003-0003-000000000003",  # blocked tail
     }
+
+
+def test_invalid_body_is_a_clean_batch_failure(rie):
+    """A non-JSON body becomes an InvalidMessage -> the record fails cleanly."""
+    result = _invoke(_load("sqs_invalid_body.json"))
+    assert result == {"batchItemFailures": [{"itemIdentifier": "inv-1"}]}
+
+
+def test_redelivered_event_with_attributes_succeeds(rie):
+    """A redelivered message (ApproximateReceiveCount>1) with messageAttributes
+    is processed normally."""
+    result = _invoke(_load("sqs_retry_with_attributes.json"))
+    assert result == {"batchItemFailures": []}

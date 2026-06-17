@@ -1,0 +1,38 @@
+# Local dev loop:
+#   - the Lambda runs as its OWN container via the Runtime Interface Emulator
+#     (bundled in public.ecr.aws/lambda/python) and is invoked by POSTing an SQS
+#     event to http://localhost:9000/2015-03-31/functions/function/invocations
+#   - LocalStack provides s3 + sqs for a handler's *outbound* AWS calls
+#     (AWS_ENDPOINT_URL). fastsqs is a pure router and makes none, so localstack
+#     is only needed when a handler sends to downstream queues / S3.
+#
+#   make start-local   # build + up
+#   make invoke-standard / make invoke-fifo
+#   make stop-local
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: fastsqs-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs
+      - DEBUG=0
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  lambda:
+    build:
+      context: ..
+      dockerfile: tests/integration/Dockerfile
+    container_name: fastsqs-lambda
+    ports:
+      - "9000:8080"
+    environment:
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      - localstack

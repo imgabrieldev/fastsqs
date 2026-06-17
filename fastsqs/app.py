@@ -8,13 +8,10 @@ from .events import SQSEvent
 from .types import QueueType, Handler
 from .exceptions import RouteNotFound, InvalidMessage
 from .middleware import Middleware, run_middlewares
-from .middleware.idempotency import IdempotencyHit
 from .middleware.logging import LoggingMiddleware
 from .routing import SQSRouter
 from .utils import group_records_by_message_group
 from .presets import MiddlewarePreset
-from .logger import Logger
-from .telemetry import Telemetry
 from .concurrency.concurrency import ThreadPoolManager
 
 
@@ -228,32 +225,11 @@ class FastSQS:
         err: Optional[Exception] = None
         result: Any = None
 
-        try:
-            self._log("debug", f"Running 'before' middleware chain", msg_id=msg_id)
-            await run_middlewares(
-                self._middlewares, "before", payload, record, context, ctx
-            )
-            self._log("debug", f"'before' middleware chain completed", msg_id=msg_id)
-        except IdempotencyHit as idempotency_hit:
-            self._log(
-                "info",
-                f"Idempotency hit, returning cached result",
-                msg_id=msg_id,
-                key=idempotency_hit.key,
-            )
-            if self.debug:
-                self._log(
-                    "debug",
-                    f"Idempotency hit for message",
-                    msg_id=msg_id,
-                    key=idempotency_hit.key,
-                )
-            ctx["idempotency_result"] = idempotency_hit.result
-            ctx["idempotency_hit"] = True
-            await run_middlewares(
-                self._middlewares, "after", payload, record, context, ctx, None
-            )
-            return idempotency_hit.result
+        self._log("debug", f"Running 'before' middleware chain", msg_id=msg_id)
+        await run_middlewares(
+            self._middlewares, "before", payload, record, context, ctx
+        )
+        self._log("debug", f"'before' middleware chain completed", msg_id=msg_id)
 
         try:
             handled = False
@@ -335,9 +311,8 @@ class FastSQS:
         return result
 
     def _cleanup_resources(self) -> None:
-        """Clean up background tasks and flush telemetry data."""
+        """Clean up background tasks."""
         ThreadPoolManager().wait_for_completion()
-        Telemetry().force_flush()
 
     async def _handle_event(self, event: dict, context: Any) -> dict:
         """Handle SQS event with multiple records.
@@ -349,16 +324,6 @@ class FastSQS:
         Returns:
             Dictionary with batch failure information
         """
-        Logger.set_lambda_context(
-            lambda_context=context,
-            custom_fields={
-                'app_title': self.title,
-                'app_version': self.version,
-                'queue_type': self.queue_type.value,
-                'debug_mode': self.debug
-            }
-        )
-        
         records = event.get("Records", [])
         if not records:
             self._cleanup_resources()

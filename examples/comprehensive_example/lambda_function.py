@@ -3,7 +3,6 @@ import asyncio
 from typing import Dict, Any, List
 from fastsqs import FastSQS, SQSEvent
 from fastsqs.middleware import (
-    IdempotencyMiddleware, MemoryIdempotencyStore,
     ErrorHandlingMiddleware, RetryConfig, DeadLetterQueueMiddleware,
     VisibilityTimeoutMonitor, ProcessingTimeMiddleware,
     ParallelizationMiddleware, ParallelizationConfig,
@@ -27,9 +26,6 @@ class CriticalMessage(SQSEvent):
 app = FastSQS()
 
 # Configure comprehensive middleware stack
-idempotency_store = MemoryIdempotencyStore()
-idempotency_middleware = IdempotencyMiddleware(idempotency_store)
-
 retry_config = RetryConfig(
     max_retries=3,
     base_delay=1.0,
@@ -59,7 +55,6 @@ parallel_middleware = ParallelizationMiddleware(parallelization_config)
 # Add middleware in order
 app.add_middleware(LoggingMiddleware())
 app.add_middleware(TimingMsMiddleware())
-app.add_middleware(idempotency_middleware)
 app.add_middleware(error_middleware)
 app.add_middleware(dlq_middleware)
 app.add_middleware(visibility_monitor)
@@ -117,7 +112,6 @@ def lambda_handler(event, context):
         
         # Get middleware statistics
         stats = {
-            "idempotency_stats": len(idempotency_store._store),
             "processing_stats": processing_middleware.get_stats() if hasattr(processing_middleware, 'get_stats') else {},
             "parallelization_stats": parallel_middleware.get_stats() if hasattr(parallel_middleware, 'get_stats') else {}
         }

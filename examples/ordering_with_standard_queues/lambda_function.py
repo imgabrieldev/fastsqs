@@ -11,15 +11,10 @@ from typing import Dict, Any
 from datetime import datetime
 from fastsqs import FastSQS, SQSEvent
 from fastsqs.middleware import (
-    IdempotencyMiddleware, MemoryIdempotencyStore,
     ParallelizationMiddleware, ParallelizationConfig
 )
 
 app = FastSQS()
-
-# Configure idempotency to prevent duplicates
-idempotency_store = MemoryIdempotencyStore()
-app.add_middleware(IdempotencyMiddleware(idempotency_store))
 
 # Configure parallelization with order control
 config = ParallelizationConfig(max_concurrent_messages=10)

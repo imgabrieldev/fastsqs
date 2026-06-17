@@ -3,12 +3,7 @@
 import asyncio
 
 from fastsqs import FastSQS, SQSEvent
-from fastsqs.middleware import (
-    Middleware,
-    ParallelizationMiddleware,
-    ConcurrencyLimiter,
-    VisibilityTimeoutMonitor,
-)
+from fastsqs.middleware import Middleware
 from fastsqs.testing import SQSTestClient
 
 
@@ -18,6 +13,26 @@ class Task(SQSEvent):
 
 def _bodies(n):
     return [{"type": "task", "task_id": str(i)} for i in range(n)]
+
+
+class SlotMiddleware(Middleware):
+    """Acquires a 'slot' in before() and releases it in after() — stands in for
+    any resource-holding middleware (concurrency slot, monitor task, ...)."""
+
+    def __init__(self, state):
+        super().__init__()
+        self.state = state
+
+    async def before(self, payload, record, context, ctx):
+        self.state["held"] += 1
+
+    async def after(self, payload, record, context, ctx, error):
+        self.state["held"] -= 1
+
+
+class FailingBefore(Middleware):
+    async def before(self, payload, record, context, ctx):
+        raise ValueError("before boom")
 
 
 def test_max_concurrent_messages_is_enforced():
@@ -33,8 +48,7 @@ def test_max_concurrent_messages_is_enforced():
         state["current"] -= 1
 
     SQSTestClient(app).send_batch(_bodies(8))
-    assert state["peak"] <= 2
-    assert state["peak"] >= 2  # and it actually parallelizes up to the limit
+    assert state["peak"] == 2  # caps at the limit and actually parallelizes to it
 
 
 def test_higher_limit_allows_more_overlap():
@@ -53,68 +67,46 @@ def test_higher_limit_allows_more_overlap():
 
 
 def test_shared_middleware_atomic_counter_is_exact():
-    """fastsqs's built-in stateful middleware increments with a plain ``+=``
-    (no await between read and write), which is atomic under asyncio's single
-    thread — so a concurrent batch counts exactly, with no lost updates. This
-    pins that contract (e.g. QueueMetricsMiddleware counters)."""
+    """A plain ``+=`` (no await between read and write) is atomic under asyncio's
+    single thread — a concurrent batch counts exactly, no lost updates."""
     app = FastSQS(max_concurrent_messages=10)
     hits = {"n": 0}
 
     class Counter(Middleware):
         async def after(self, payload, record, context, ctx, error):
-            hits["n"] += 1  # atomic: no await between read and write
+            hits["n"] += 1
 
     app.add_middleware(Counter())
 
     @app.route(Task)
     async def handle(msg: Task):
-        await asyncio.sleep(0.001)  # force overlap across the batch
+        await asyncio.sleep(0.001)
 
     SQSTestClient(app).send_batch(_bodies(50))
     assert hits["n"] == 50
 
 
-# Regression for bug A: a before-hook raising must NOT leak the concurrency slot
-# acquired by an earlier middleware (the after/release must still run).
-def test_before_hook_failure_releases_concurrency_slot():
+# Regression for the wind/unwind fix: a before-hook raising must NOT leak the
+# resource a prior middleware acquired in before() — its after() must still run.
+def test_before_hook_failure_releases_prior_middleware_resource():
     app = FastSQS(max_concurrent_messages=2)
-    limiter = ConcurrencyLimiter(max_concurrent=2)
-    app.add_middleware(ParallelizationMiddleware(concurrency_limiter=limiter))
-
-    class FailingBefore(Middleware):
-        async def before(self, payload, record, context, ctx):
-            raise ValueError("before boom")
-
-    app.add_middleware(FailingBefore())
+    state = {"held": 0}
+    app.add_middleware(SlotMiddleware(state))
+    app.add_middleware(FailingBefore())  # before() raises AFTER SlotMiddleware entered
 
     @app.route(Task)
     async def handle(msg: Task):
         pass
 
     result = SQSTestClient(app).send_batch(_bodies(2))
-    # both records fail (before raised) ...
-    assert len(result["batchItemFailures"]) == 2
-    # ... but the slots were released (no leak/deadlock)
-    assert limiter.stats["active_count"] == 0
-
-    # a subsequent batch must still run (would hang if slots had leaked)
-    second = SQSTestClient(app).send_batch(_bodies(2))
-    assert limiter.stats["active_count"] == 0
-    assert len(second["batchItemFailures"]) == 2  # still fails, but no hang
+    assert len(result["batchItemFailures"]) == 2  # both fail (before raised)
+    assert state["held"] == 0  # SlotMiddleware.after still ran -> no leak
 
 
-def test_before_hook_failure_does_not_deadlock_subsequent_invocations():
-    """The visibility monitor + concurrency slot must be cleaned even when a
-    later before-hook raises, so repeated invocations never starve."""
+def test_before_hook_failure_does_not_leak_across_invocations():
     app = FastSQS(max_concurrent_messages=1)
-    limiter = ConcurrencyLimiter(max_concurrent=1)
-    app.add_middleware(ParallelizationMiddleware(concurrency_limiter=limiter))
-    app.add_middleware(VisibilityTimeoutMonitor(default_visibility_timeout=30.0))
-
-    class FailingBefore(Middleware):
-        async def before(self, payload, record, context, ctx):
-            raise RuntimeError("boom")
-
+    state = {"held": 0}
+    app.add_middleware(SlotMiddleware(state))
     app.add_middleware(FailingBefore())
 
     @app.route(Task)
@@ -124,4 +116,4 @@ def test_before_hook_failure_does_not_deadlock_subsequent_invocations():
     client = SQSTestClient(app)
     for _ in range(5):
         client.send({"type": "task", "task_id": "1"})
-        assert limiter.stats["active_count"] == 0
+        assert state["held"] == 0  # never accumulates -> no starvation

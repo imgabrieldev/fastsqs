@@ -13,16 +13,7 @@ from .middleware import (
     TimingMsMiddleware,
     LoggingMiddleware,
     ErrorHandlingMiddleware,
-    CircuitBreaker,
     DeadLetterQueueMiddleware,
-    VisibilityTimeoutMonitor,
-    ProcessingTimeMiddleware,
-    QueueMetricsMiddleware,
-    ParallelizationMiddleware,
-    ConcurrencyLimiter,
-    ResourcePool,
-    ParallelizationConfig,
-    LoadBalancingMiddleware,
 )
 from .events import SQSEvent
 from .presets import MiddlewarePreset
@@ -42,15 +33,6 @@ __all__ = [
     "LoggingMiddleware",
     "SQSEvent",
     "ErrorHandlingMiddleware",
-    "CircuitBreaker",
     "DeadLetterQueueMiddleware",
-    "VisibilityTimeoutMonitor",
-    "ProcessingTimeMiddleware",
-    "QueueMetricsMiddleware",
-    "ParallelizationMiddleware",
-    "ConcurrencyLimiter",
-    "ResourcePool",
-    "ParallelizationConfig",
-    "LoadBalancingMiddleware",
     "MiddlewarePreset",
 ]

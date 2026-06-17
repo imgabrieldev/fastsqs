@@ -134,22 +134,21 @@ class FastSQS(RecordProcessingMixin):
                 middleware.log(level, message, **data)
                 return
 
-    def use_preset(self, preset: str, **kwargs) -> None:
+    def use_preset(self, preset: str) -> None:
         """Apply a predefined middleware preset.
 
         Args:
             preset: Preset name (production, development, minimal)
-            **kwargs: Additional preset configuration
 
         Raises:
             ValueError: If preset name is unknown
         """
         if preset == "production":
-            middlewares = MiddlewarePreset.production(**kwargs)
+            middlewares = MiddlewarePreset.production()
         elif preset == "development":
-            middlewares = MiddlewarePreset.development(**kwargs)
+            middlewares = MiddlewarePreset.development()
         elif preset == "minimal":
-            middlewares = MiddlewarePreset.minimal(**kwargs)
+            middlewares = MiddlewarePreset.minimal()
         else:
             raise ValueError(
                 f"Unknown preset: {preset}. Available: production, development, minimal"

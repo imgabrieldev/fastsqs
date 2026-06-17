@@ -1,10 +1,8 @@
 """Validation, normalization, masking & error-handling battle tests."""
 
 from fastsqs import FastSQS, SQSEvent
-from fastsqs.middleware import Middleware, ErrorHandlingMiddleware, CircuitBreaker
-from fastsqs.middleware.error_handling import CircuitBreakerState
+from fastsqs.middleware import Middleware, ErrorHandlingMiddleware
 from fastsqs.testing import SQSTestClient
-from fastsqs.utils import shallow_mask, deep_mask
 
 
 class Task(SQSEvent):
@@ -109,21 +107,6 @@ def test_handler_error_not_masked_by_after_hook_error():
     assert len(seen) == 1 and isinstance(seen[0], ValueError)
 
 
-# ---- circuit breaker transitions ----
-
-def test_circuit_breaker_opens_at_threshold_and_resets():
-    cb = CircuitBreaker(failure_threshold=2, recovery_timeout=60.0)
-    assert cb.should_allow_request() is True
-    cb.record_failure(ValueError())
-    assert cb.state == CircuitBreakerState.CLOSED
-    cb.record_failure(ValueError())
-    assert cb.state == CircuitBreakerState.OPEN
-    assert cb.should_allow_request() is False
-    cb.record_success()
-    assert cb.state == CircuitBreakerState.CLOSED
-    assert cb.should_allow_request() is True
-
-
 def test_error_handler_dlq_sync_and_async():
     # sync dlq
     sync_seen = []
@@ -156,30 +139,6 @@ def test_error_handler_dlq_sync_and_async():
 
     SQSTestClient(app2).send({"type": "task", "task_id": "1"})
     assert async_seen == ["ConnectionError"]
-
-
-# ---- masking: shallow vs deep (D4) ----
-
-def test_shallow_mask_top_level_only():
-    out = shallow_mask({"cpf": "123", "nested": {"cpf": "456"}}, ["cpf"])
-    assert out["cpf"] == "***"
-    assert out["nested"]["cpf"] == "456"  # shallow leaves nested
-
-
-def test_deep_mask_recurses_into_nested_and_lists():
-    payload = {
-        "cpf": "111",
-        "customer": {"cpf": "222", "name": "Ada"},
-        "items": [{"cpf": "333"}, {"ok": 1}],
-    }
-    out = deep_mask(payload, ["cpf"])
-    assert out["cpf"] == "***"
-    assert out["customer"]["cpf"] == "***"
-    assert out["customer"]["name"] == "Ada"
-    assert out["items"][0]["cpf"] == "***"
-    assert out["items"][1] == {"ok": 1}
-    # input not mutated
-    assert payload["customer"]["cpf"] == "222"
 
 
 # ---- D3: positional-only params are not injected (documented) ----

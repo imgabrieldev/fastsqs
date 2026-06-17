@@ -3,10 +3,9 @@
 import json
 import time
 import traceback
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 from .base import Middleware
-from ..utils import deep_mask
 
 
 class LoggingMiddleware(Middleware):
@@ -25,7 +24,6 @@ class LoggingMiddleware(Middleware):
         include_payload: bool = True,
         include_record: bool = False,
         include_context: bool = False,
-        mask_fields: Optional[List[str]] = None,
         verbose: bool = True,
     ):
         """Initialize logging middleware.
@@ -36,14 +34,12 @@ class LoggingMiddleware(Middleware):
             include_payload: Whether to include message payload in logs
             include_record: Whether to include SQS record in logs
             include_context: Whether to include Lambda context in logs
-            mask_fields: List of fields to mask in payloads
             verbose: Enable verbose logging with additional context
         """
         self.level = level
         self.include_payload = include_payload
         self.include_record = include_record
         self.include_context = include_context
-        self.mask_fields = mask_fields or []
         self.verbose = verbose
 
         def _default_logger(obj: dict) -> None:
@@ -95,7 +91,7 @@ class LoggingMiddleware(Middleware):
         }
 
         if self.include_payload:
-            entry["payload"] = deep_mask(payload, self.mask_fields)
+            entry["payload"] = payload
         if self.include_record:
             entry["record"] = record
         if self.include_context:
@@ -141,7 +137,7 @@ class LoggingMiddleware(Middleware):
             }
 
         if self.include_payload:
-            entry["payload"] = deep_mask(payload, self.mask_fields)
+            entry["payload"] = payload
         if self.include_record:
             entry["record"] = record
         if self.include_context:

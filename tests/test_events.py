@@ -25,7 +25,8 @@ def test_snake_case_fields_bind():
     assert captured["msg"].customer_name == "Ana"
 
 
-def test_camel_case_normalized_to_snake():
+def test_camel_case_alias_binds_to_snake():
+    # camelCase is accepted via Pydantic alias generation (populate_by_name)
     app = FastSQS()
     captured = _route_capturing(app)
     SQSTestClient(app).send({"type": "order", "orderId": "2", "customerName": "Bia"})
@@ -33,9 +34,13 @@ def test_camel_case_normalized_to_snake():
     assert captured["msg"].customer_name == "Bia"
 
 
-def test_kebab_case_normalized_to_snake():
+def test_kebab_case_not_supported():
+    # v1 dropped the bespoke fuzzy normalizer: kebab-case keys no longer bind,
+    # so the message fails validation and is reported as a batch failure.
     app = FastSQS()
     captured = _route_capturing(app)
-    SQSTestClient(app).send({"type": "order", "order-id": "3", "customer-name": "Cid"})
-    assert captured["msg"].order_id == "3"
-    assert captured["msg"].customer_name == "Cid"
+    r = SQSTestClient(app).send(
+        {"type": "order", "order-id": "3", "customer-name": "Cid"}, message_id="k1"
+    )
+    assert r["batchItemFailures"] == [{"itemIdentifier": "k1"}]
+    assert "msg" not in captured

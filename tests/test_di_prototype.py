@@ -40,7 +40,7 @@ def test_backward_compat_plain_handler_unchanged():
 
     @app.route(Task)
     async def handle(msg: Task, ctx):   # no Depends -> name-based path, untouched
-        got.append((msg.task_id, ctx["messageId"]))
+        got.append((msg.task_id, ctx.message_id))
 
     SQSTestClient(app).send({"type": "task", "task_id": "2"}, message_id="m9")
     assert got == [("2", "m9")]

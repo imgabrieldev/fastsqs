@@ -1,180 +1,176 @@
 # FastSQS
 
-**FastAPI-like, production-ready async SQS message processing for Python.**
+**A FastAPI-style router for AWS SQS on Lambda** — pydantic routing, dependency
+injection, a middleware system, and native partial batch failure.
 
 [![PyPI version](https://img.shields.io/pypi/v/fastsqs.svg)](https://pypi.org/project/fastsqs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 
 ---
 
-## Version 0.4.0 - Enhanced Enterprise Features
+FastSQS turns an SQS-triggered Lambda into a typed, declarative app. You write
+handlers for pydantic event models; FastSQS parses each record, routes it,
+validates it, runs your middleware, and returns the `batchItemFailures` SQS
+expects — so failed messages are redelivered and dead-lettered by the queue's
+own redrive policy, not by bespoke in-app code.
 
-> ⚠️ **Pre-1.0 Release Warning**: This library is under active development. Breaking changes may occur until version 1.0.0. Pin your version in production.
+## Features
 
-### 🚀 New in Version 0.4.0
+- 🚀 **FastAPI-style routing** — `@app.route(OrderCreated)` dispatches by a payload discriminator (default key `"type"`).
+- 🔒 **Pydantic validation** — handlers receive a validated `SQSEvent` model; bad messages become clean batch failures.
+- 💉 **Dependency injection** — declare `Depends(...)` params (powered by `fast-depends`); no `@inject` needed.
+- 🧩 **Typed `Context`** — `ctx.message_id`, `ctx.queue_type`, … as typed attributes; arbitrary scratch in `ctx.state`.
+- 🪝 **Middleware** — `before`/`after` hooks with balanced unwind (resources acquired in `before` are always released).
+- 🦾 **Partial batch failure** — native `ReportBatchItemFailures` for standard and FIFO queues.
+- 🔀 **FIFO-aware** — queue type is inferred from the event-source ARN; per-group ordering with configurable failure mode.
+- 🧪 **In-process test client** — drive your app with synthetic events, no AWS required.
+- 🐍 **Typed** — ships `py.typed`; full editor/mypy support.
 
-- **Middleware Presets**: Quick setup with production, development, and minimal presets
-- **Pydantic-only core**: no external infra dependencies
-- **Queue Metrics**: Comprehensive queue performance monitoring
-- **Custom Middleware Framework**: Simplified custom middleware creation with examples
-
-### 🏗️ Built-in Middleware
-
-- **Logging / Timing**: structured logging and per-message duration
-- **Bring your own**: error handling, idempotency, metrics, masking, etc. are application concerns — add them as your own middleware via the before/after hooks
-
-## Key Features
-
-- 🚀 **FastAPI-like API:** Familiar decorator-based routing with automatic type inference
-- 🔒 **Pydantic Validation:** Automatic message validation and serialization using SQSEvent models
-- 🔄 **Auto Async/Sync:** Write handlers as sync or async functions - framework handles both automatically
-- ⚡ **Middleware Presets:** One-line setup for production, development, or minimal configurations
-- 🧩 **Middleware Hooks:** before/after hooks with balanced cleanup — compose your own logging/metrics/error handling
-- 🦾 **Partial Batch Failure:** Native `batchItemFailures` — failures are redelivered/dead-lettered by SQS (redrive policy)
-- 🔀 **FIFO & Standard Queues:** Full support for both SQS queue types with proper ordering
-- 🎯 **Flexible Matching:** Automatic field name normalization (camelCase ↔ snake_case)
-- 🏗️ **Nested Routing:** QueueRouter support for complex routing scenarios
-- 🐍 **Type Safety:** Full type hints and editor support throughout
-
----
-
-## Requirements
-
-- Python 3.8+
-- [Pydantic](https://docs.pydantic.dev/) (installed automatically)
-
----
-
-## Installation
+## Install
 
 ```bash
-# Installation (pydantic-only, no extras)
 pip install fastsqs
-
-# With all optional features
-pip install fastsqs[all]
 ```
 
----
+Requires Python 3.10+. Depends on `pydantic>=2` and `fast-depends>=3`.
 
-## Quick Start
-
-### Basic FastAPI-like Example
+## Quick start
 
 ```python
 from fastsqs import FastSQS, SQSEvent
 
-class UserCreated(SQSEvent):
-    user_id: str
-    email: str
-    name: str
+app = FastSQS()  # queue type auto-detected from the event-source ARN
 
-class OrderProcessed(SQSEvent):
+
+class OrderCreated(SQSEvent):
     order_id: str
-    amount: float
+    amount: int
 
-# Create FastSQS app
-app = FastSQS(debug=True)
 
-# Route messages using SQSEvent models
-@app.route(UserCreated)
-async def handle_user_created(msg: UserCreated):
-    print(f"User created: {msg.name} ({msg.email})")
+@app.route(OrderCreated)
+async def handle_order(msg: OrderCreated):
+    print("processing", msg.order_id, msg.amount)
+    # raising marks this record as failed -> SQS redelivers it
 
-@app.route(OrderProcessed)
-def handle_order_processed(msg: OrderProcessed):
-    print(f"Order {msg.order_id}: ${msg.amount}")
 
-# Default handler for unmatched messages
-@app.default()
-def handle_unknown(payload, ctx):
-    print(f"Unknown message: {payload}")
-
-# AWS Lambda handler
-def lambda_handler(event, context):
+# Lambda entry point (set as the function handler):
+def handler(event, context):
     return app.handler(event, context)
 ```
 
-### Example SQS Message Payloads
+A message is routed by its discriminator value (`"type"` by default), matched to
+the event model's name in snake_case — `{"type": "order_created", "order_id": "...", "amount": 1}`
+routes to `OrderCreated`.
 
-```json
-{
-  "type": "user_created",
-  "user_id": "123",
-  "email": "user@example.com",
-  "name": "John Doe"
-}
-```
+## Typed context
 
-```json
-{
-  "type": "order_processed",
-  "order_id": "ord-456",
-  "amount": 99.99
-}
-```
-
----
-
-## Advanced Features
-
-### Middleware Presets (New in 0.4.0)
+Annotate a handler (or middleware) param `ctx: Context` for typed access to the
+framework-owned fields. Put your own scratch data in `ctx.state`:
 
 ```python
-# Production-ready setup in one line
-app = FastSQS(max_concurrent_messages=10)
-app.use_preset("production")
+from fastsqs import FastSQS, SQSEvent, Context
 
-# Development setup
-app.use_preset("development")
+app = FastSQS()
 
-# Minimal setup
-app.use_preset("minimal")
+
+@app.route(OrderCreated)
+async def handle(msg: OrderCreated, ctx: Context):
+    ctx.message_id        # str
+    ctx.queue_type        # QueueType enum (.value for the string)
+    ctx.fifo_info         # FifoInfo | None (.message_group_id, ...)
+    ctx.state.tenant = "acme"   # arbitrary scratch — never collides with a framework field
 ```
 
-### Manual Middleware Configuration
+## Dependency injection
+
+Declare `Depends(...)` params and FastSQS wires them per invocation (no decorator):
 
 ```python
-# FIFO Queue Support
-app = FastSQS(queue_type=QueueType.FIFO)
+from fastsqs import FastSQS, SQSEvent, Depends
 
-# Individual middleware
-from fastsqs.middleware import TimingMsMiddleware, LoggingMiddleware
+def get_db():
+    return Database(...)
+
+app = FastSQS()
+
+
+@app.route(OrderCreated)
+async def handle(msg: OrderCreated, db=Depends(get_db)):
+    await db.save(msg.order_id)
+```
+
+Sub-dependencies (a `Depends` that itself takes `Depends`) resolve automatically.
+
+## Middleware
+
+Subclass `Middleware` and override `before` / `after`. `after` always runs for
+every middleware whose `before` completed (balanced unwind), and receives the
+`error` (or `None`):
+
+```python
+from fastsqs import FastSQS, Middleware, TimingMiddleware, LoggingMiddleware
+
+class Audit(Middleware):
+    async def before(self, payload, record, context, ctx):
+        ctx.state.t0 = ...
+    async def after(self, payload, record, context, ctx, error):
+        if error is not None:
+            ...  # observe the failure
+
+app = FastSQS()
 app.add_middleware(LoggingMiddleware())
-app.add_middleware(TimingMsMiddleware())
-
-# Field Matching - automatically handles camelCase ↔ snake_case
-class UserEvent(SQSEvent):
-    user_id: str  # Matches: user_id, userId, USER_ID
-    first_name: str  # Matches: first_name, firstName
+app.add_middleware(TimingMiddleware())
+app.add_middleware(Audit())
 ```
 
----
+Observability, idempotency and PII masking are application concerns — compose
+them as your own middleware (or use `aws-lambda-powertools` alongside FastSQS).
 
-## How it Works
+## FIFO & partial batch failure
 
-1. **Message Parsing:** JSON validated and normalized
-2. **Route Matching:** Type-based routing to handlers  
-3. **Handler Execution:** Sync/async functions supported
-4. **Error Handling:** Failed messages → SQS retry/DLQ
+- **Queue type** is `QueueType.AUTO` by default: FastSQS infers FIFO from a
+  `.fifo` event-source ARN. Force it with `FastSQS(queue_type=QueueType.FIFO)`.
+- **`fifo_failure_mode`** (FIFO only): `"isolate_groups"` (default) blocks only
+  the failed `messageGroupId`'s tail; `"halt_batch"` halts the whole batch at the
+  first failure (AWS Powertools' default).
+- **`partial_batch_failure`** (default `True`) reports per-record failures. Set
+  it `False` to fail the entire batch (raising `BatchFailedError`) so SQS
+  redelivers every message.
 
----
+FastSQS only *reports* failures — redelivery and dead-lettering are the queue's
+job (visibility timeout + `maxReceiveCount` + redrive policy).
 
-## Error Handling & Performance
+`max_concurrent_messages` (default 10) bounds concurrency on standard queues;
+FIFO records are processed in order per group.
 
-- **Predictable Errors:** All failures result in batch item failures for SQS retry
-- **Parallel Processing:** Concurrent message handling (respects FIFO ordering)
-- **Type Safety:** Full Pydantic validation with IDE support
-- **Memory Efficient:** Minimal overhead per message
+## Testing
 
----
+```python
+from fastsqs.testing import SQSTestClient, RecordSpec
 
-## Documentation & Contributing
+client = SQSTestClient(app)
 
-- **Examples:** See `examples/` directory for complete working examples
-- **Contributing:** Issues and PRs welcome!
-- **License:** MIT
+# one message
+result = client.send({"type": "order_created", "order_id": "1", "amount": 5})
+assert result == {"batchItemFailures": []}
 
----
+# a FIFO batch with two message groups (a .fifo ARN is set so AUTO infers FIFO)
+client.send_batch([
+    RecordSpec({"type": "order_created", "order_id": "1", "amount": 1}, group_id="g1"),
+    RecordSpec({"type": "order_created", "order_id": "2", "amount": 2}, group_id="g2"),
+])
 
-**Ready to build type-safe, FastAPI-like SQS processors? Try FastSQS today!**
+# a raw (malformed) body to exercise the InvalidMessageError path
+client.send("{not json", message_id="bad")
+```
+
+## Exceptions
+
+All errors derive from `FastSQSError`: `RouteNotFoundError`,
+`InvalidMessageError`, and `BatchFailedError` (whose `.failures` holds the failed
+item ids).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

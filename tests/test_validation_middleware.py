@@ -9,7 +9,7 @@ class Task(SQSEvent):
     task_id: str
 
 
-# ---- validation surfaces as InvalidMessage and preserves messageId ----
+# ---- validation surfaces as InvalidMessageError and preserves messageId ----
 
 class Strict(SQSEvent):
     amount: int

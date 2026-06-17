@@ -6,14 +6,14 @@ SQS event ({"Records":[...]}) exactly as the SQS event-source mapping delivers
 it in production, and `lambda_handler` returns the partial-batch-failure result.
 """
 
-from fastsqs import FastSQS, SQSEvent, QueueType
+from fastsqs import FastSQS, SQSEvent
 
 
 class Task(SQSEvent):
     task_id: str
 
 
-app = FastSQS()
+app = FastSQS()  # QueueType.AUTO infers FIFO from a .fifo event-source ARN
 
 
 @app.route(Task)
@@ -25,11 +25,12 @@ async def handle(msg: Task):
 
 
 def lambda_handler(event, context):
-    # FIFO fixtures carry messageGroupId; flip the queue type so the FIFO
-    # ordering path is exercised when those events are injected.
+    # FIFO fixtures carry messageGroupId but no real ARN; stamp a .fifo
+    # event-source ARN so QueueType.AUTO exercises the FIFO ordering path.
     records = event.get("Records", [])
-    is_fifo = any(
-        (r.get("attributes", {}) or {}).get("messageGroupId") for r in records
-    )
-    app.set_queue_type(QueueType.FIFO if is_fifo else QueueType.STANDARD)
+    if any((r.get("attributes", {}) or {}).get("messageGroupId") for r in records):
+        for r in records:
+            r.setdefault(
+                "eventSourceARN", "arn:aws:sqs:us-east-1:000000000000:rie.fifo"
+            )
     return app.handler(event, context)

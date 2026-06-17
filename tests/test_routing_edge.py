@@ -32,7 +32,7 @@ def test_handler_msg_and_ctx():
 
     @app.route(Task)
     async def h(msg: Task, ctx):
-        got["ctx_type"] = ctx.get("message_type")
+        got["ctx_type"] = ctx.message_type
 
     SQSTestClient(app).send({"type": "task", "task_id": "1"})
     assert got["ctx_type"] == "task"
@@ -155,7 +155,7 @@ def test_base_event_class_enforced():
 # ---- key-value routing via an included router ----
 
 def test_included_router_key_value_routing():
-    router = SQSRouter(key="action")
+    router = SQSRouter(discriminator="action")
     seen = []
 
     @router.route("ping")

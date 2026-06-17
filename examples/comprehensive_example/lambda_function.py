@@ -2,7 +2,7 @@ import json
 import asyncio
 from typing import Dict, Any, List
 from fastsqs import FastSQS, SQSEvent
-from fastsqs.middleware import TimingMsMiddleware, LoggingMiddleware
+from fastsqs.middleware import TimingMiddleware, LoggingMiddleware
 
 # Define event models
 class OrderProcessing(SQSEvent):
@@ -24,7 +24,7 @@ class CriticalMessage(SQSEvent):
 app = FastSQS(max_concurrent_messages=5)
 
 app.add_middleware(LoggingMiddleware())
-app.add_middleware(TimingMsMiddleware())
+app.add_middleware(TimingMiddleware())
 
 @app.route(OrderProcessing)
 async def process_order(msg: OrderProcessing) -> Dict[str, Any]:

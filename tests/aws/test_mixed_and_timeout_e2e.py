@@ -13,13 +13,13 @@ pytestmark = pytest.mark.aws
 
 
 def test_validation_failure_and_handler_failure_both_redrive(aws, pipeline, drain):
-    """A malformed body (InvalidMessage) and a handler exception both fail and
+    """A malformed body (InvalidMessageError) and a handler exception both fail and
     redrive to the DLQ; a valid/successful record does not."""
     sqs = aws["sqs"]
     main_url, dlq_url = pipeline(max_receive_count=2)
 
     sqs.send_message(QueueUrl=main_url, MessageBody=json.dumps({"type": "task", "task_id": "ok-A"}))
-    sqs.send_message(QueueUrl=main_url, MessageBody="{not valid json")  # -> InvalidMessage
+    sqs.send_message(QueueUrl=main_url, MessageBody="{not valid json")  # -> InvalidMessageError
     sqs.send_message(QueueUrl=main_url, MessageBody=json.dumps({"type": "task", "task_id": "boom-C"}))
 
     moved = drain(dlq_url, timeout=150, min_count=2)

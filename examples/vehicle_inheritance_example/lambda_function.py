@@ -49,9 +49,6 @@ class Motorcycle(Vehicle):
 
 # Main FastSQS App
 app = FastSQS(
-    title="Vehicle Inheritance Routing Example",
-    description="Demonstrates inheritance-based routing with base and specific vehicle types",
-    version="1.0.0",
     debug=True,
 )
 

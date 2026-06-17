@@ -11,9 +11,6 @@ class OrderUpdated(SQSEvent):
 
 print("=== Standard Queue Example ===")
 standard_app = FastSQS(
-    title="Standard Queue App",
-    description="Example showing Standard SQS queue processing",
-    version="1.0.0",
     debug=True,
 )
 

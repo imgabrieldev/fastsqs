@@ -10,7 +10,7 @@ are processed concurrently up to that limit (asyncio).
 
 ### 2. Logging & Timing
 - `LoggingMiddleware` — structured JSON logging.
-- `TimingMsMiddleware` — per-message duration.
+- `TimingMiddleware` — per-message duration.
 
 ### 3. Failure handling = SQS
 fastsqs reports failed records as `batchItemFailures`; the queue's **redrive
@@ -25,7 +25,7 @@ in Terraform).
 ## Middleware Stack
 
 1. **LoggingMiddleware** — structured logging
-2. **TimingMsMiddleware** — per-message timing
+2. **TimingMiddleware** — per-message timing
 
 (Need error classification, metrics, idempotency, masking? Write a small
 `Middleware` subclass — see `examples/custom_middleware_example`.)

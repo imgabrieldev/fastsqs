@@ -29,11 +29,8 @@ class InvalidMessage(SQSEvent):
 
 
 app = FastSQS(
-    title="Custom Middleware Example App",
-    description="Example showing custom middleware usage",
-    version="1.0.0",
     debug=True,
-    message_type_key="action"
+    discriminator="action",
 )
 
 app.add_middleware(CustomLoggingMiddleware())

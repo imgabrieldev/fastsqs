@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class RouteEntry:
-    """Data class representing a route entry in the router.
+class _RouteEntry:
+    """Internal route entry record held by SQSRouter (not part of the public API).
 
     Attributes:
         handler: Optional handler function for the route

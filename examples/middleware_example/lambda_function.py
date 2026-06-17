@@ -1,4 +1,4 @@
-from fastsqs import FastSQS, SQSEvent, LoggingMiddleware, TimingMsMiddleware
+from fastsqs import FastSQS, SQSEvent, LoggingMiddleware, TimingMiddleware
 import json
 import asyncio
 
@@ -31,15 +31,12 @@ class ProfileUpdate(SQSEvent):
 
 
 app = FastSQS(
-    title="Middleware Example App",
-    description="Example showing built-in middleware usage",
-    version="1.0.0",
     debug=True,
-    message_type_key="action"
+    discriminator="action",
 )
 
 app.add_middleware(LoggingMiddleware())
-app.add_middleware(TimingMsMiddleware())
+app.add_middleware(TimingMiddleware())
 
 
 @app.route(UserLogin)

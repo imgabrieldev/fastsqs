@@ -1,4 +1,4 @@
-from fastsqs import FastSQS, SQSEvent, QueueType
+from fastsqs import FastSQS, SQSEvent, Context, QueueType
 
 
 class OrderCreated(SQSEvent):
@@ -9,46 +9,39 @@ class OrderUpdated(SQSEvent):
 
 
 fifo_app = FastSQS(
-    title="FIFO Queue App",
-    description="Example showing FIFO SQS queue processing",
-    version="1.0.0",
     queue_type=QueueType.FIFO,
     debug=True,
 )
 
 
 @fifo_app.route(OrderCreated)
-async def handle_order_created(msg: OrderCreated, ctx):
-    queue_type = ctx.get("queueType")
-    fifo_info = ctx.get("fifoInfo", {})
-
-    if queue_type == "fifo":
-        message_group = fifo_info.get("messageGroupId")
-        dedup_id = fifo_info.get("messageDeduplicationId")
+async def handle_order_created(msg: OrderCreated, ctx: Context):
+    if ctx.queue_type.value == "fifo":
+        fifo_info = ctx.fifo_info
+        message_group = fifo_info.message_group_id if fifo_info else None
+        dedup_id = fifo_info.message_deduplication_id if fifo_info else None
         print(f"Processing order in FIFO queue, group: {message_group}")
         print(f"Deduplication ID: {dedup_id}")
     else:
         print("Processing order in Standard queue")
 
     print(f"Order created: {msg.order_id}")
-    print(f"Message ID: {ctx.get('messageId')}")
+    print(f"Message ID: {ctx.message_id}")
 
 
 @fifo_app.route(OrderUpdated)
-async def handle_order_updated(msg: OrderUpdated, ctx):
-    queue_type = ctx.get("queueType")
-    fifo_info = ctx.get("fifoInfo", {})
-
-    if queue_type == "fifo":
-        message_group = fifo_info.get("messageGroupId")
-        dedup_id = fifo_info.get("messageDeduplicationId")
+async def handle_order_updated(msg: OrderUpdated, ctx: Context):
+    if ctx.queue_type.value == "fifo":
+        fifo_info = ctx.fifo_info
+        message_group = fifo_info.message_group_id if fifo_info else None
+        dedup_id = fifo_info.message_deduplication_id if fifo_info else None
         print(f"Processing order update in FIFO queue, group: {message_group}")
         print(f"Deduplication ID: {dedup_id}")
     else:
         print("Processing order update in Standard queue")
 
     print(f"Order updated: {msg.order_id}")
-    print(f"Message ID: {ctx.get('messageId')}")
+    print(f"Message ID: {ctx.message_id}")
 
 
 def lambda_handler(event, context):

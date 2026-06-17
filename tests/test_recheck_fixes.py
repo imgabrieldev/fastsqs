@@ -10,7 +10,7 @@ from fastsqs import (
     SQSRouter,
     SQSEvent,
     QueueType,
-    InvalidMessage,
+    InvalidMessageError,
 )
 from fastsqs.middleware import Middleware
 from fastsqs.testing import SQSTestClient
@@ -72,7 +72,7 @@ def test_router_level_middleware_runs_on_pydantic_route():
 
 # B3 — a validation failure on a key-value route with model= raised
 # `ValidationError(str)` which itself blew up as a TypeError in pydantic v2.
-# It must surface as InvalidMessage and become a clean batch failure.
+# It must surface as InvalidMessageError and become a clean batch failure.
 def test_validation_failure_surfaces_as_invalid_message():
     seen_errors = []
 
@@ -83,7 +83,7 @@ def test_validation_failure_surfaces_as_invalid_message():
     app = FastSQS()
     app.add_middleware(Capture())
 
-    router = SQSRouter(key="action")
+    router = SQSRouter(discriminator="action")
 
     @router.route("do", model=Task)
     async def handle(msg: Task):
@@ -96,7 +96,7 @@ def test_validation_failure_surfaces_as_invalid_message():
 
     assert result == {"batchItemFailures": [{"itemIdentifier": "bad-1"}]}
     assert len(seen_errors) == 1
-    assert isinstance(seen_errors[0], InvalidMessage)
+    assert isinstance(seen_errors[0], InvalidMessageError)
 
 
 # B6 — retry machinery was dead code; it has been removed.
@@ -112,8 +112,7 @@ def test_retryconfig_is_gone():
 # failed record plus every later record in the group as a batch failure so SQS
 # redelivers the tail in order.
 def test_fifo_failure_halts_group_and_marks_tail():
-    app = FastSQS()
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(queue_type=QueueType.FIFO)
 
     processed = []
 
@@ -141,8 +140,7 @@ def test_fifo_failure_halts_group_and_marks_tail():
 
 # B7 — independent FIFO groups are not affected by each other's failures.
 def test_fifo_failure_isolated_per_group():
-    app = FastSQS()
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(queue_type=QueueType.FIFO)
 
     processed = []
 

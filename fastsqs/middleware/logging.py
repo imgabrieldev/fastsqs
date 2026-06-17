@@ -82,9 +82,9 @@ class LoggingMiddleware(Middleware):
         }
 
         entry["processing_info"] = {
-            "route_path": ctx.get("route_path", []),
+            "route_path": ctx.route_path,
             "message_type": payload.get("type") if isinstance(payload, dict) else None,
-            "queue_type": ctx.get("queueType"),
+            "queue_type": ctx.queue_type.value,
             "context_aws_request_id": getattr(context, 'aws_request_id', None),
             "context_function_name": getattr(context, 'function_name', None),
             "context_memory_limit": getattr(context, 'memory_limit_in_mb', None),
@@ -98,7 +98,7 @@ class LoggingMiddleware(Middleware):
             entry["context_repr"] = repr(context)
 
         if self.verbose:
-            entry["ctx_keys"] = list(ctx.keys())
+            entry["state_keys"] = list(ctx.state)
 
         self.logger(entry)
 
@@ -112,11 +112,12 @@ class LoggingMiddleware(Middleware):
             "middleware": "LoggingMiddleware",
         }
 
+        handler_result = ctx.handler_result
         entry["processing_results"] = {
-            "duration_ms": ctx.get("duration_ms"),
-            "route_path": ctx.get("route_path", []),
-            "message_type": ctx.get("message_type"),
-            "handler_result_type": type(ctx.get("handler_result")).__name__ if ctx.get("handler_result") is not None else None,
+            "duration_ms": ctx.state.get("duration_ms"),
+            "route_path": ctx.route_path,
+            "message_type": ctx.message_type,
+            "handler_result_type": type(handler_result).__name__ if handler_result is not None else None,
         }
 
         if error:
@@ -125,16 +126,10 @@ class LoggingMiddleware(Middleware):
                 "error_message": str(error),
                 "error_repr": repr(error),
                 "traceback": traceback.format_exc(),
-                "error_history": ctx.get("error_history", []),
             }
 
         if self.verbose:
-            entry["context_summary"] = {
-                "all_ctx_keys": list(ctx.keys()),
-                "visibility_timeout": ctx.get("visibility_timeout"),
-                "visibility_warned": ctx.get("visibility_warned"),
-                "concurrency_stats": ctx.get("concurrency_stats"),
-            }
+            entry["state_keys"] = list(ctx.state)
 
         if self.include_payload:
             entry["payload"] = payload

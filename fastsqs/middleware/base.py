@@ -1,64 +1,66 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Awaitable, Callable, List, Optional
+import logging
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional
+
+if TYPE_CHECKING:
+    from ..types import Context
+
+_logger = logging.getLogger("fastsqs")
 
 
 class Middleware:
     """Base class for FastSQS middleware.
-    
-    Middleware can hook into message processing before and after handler execution.
+
+    Middleware can hook into message processing before and after handler
+    execution. Subclasses override :meth:`before` and/or :meth:`after`.
     """
-    
-    def __init__(self):
-        """Initialize middleware."""
-        self._app = None
-    
-    def _log(self, level: str, message: str, **data) -> None:
-        """Log method that routes through the app's logging system.
-        
-        Args:
-            level: Log level (info, debug, error, etc.)
-            message: Log message
-            **data: Additional log data
-        """
-        if self._app and hasattr(self._app, '_log'):
-            self._app._log(level, message, **data)
-    
-    async def before(self, payload: dict, record: dict, context: Any, ctx: dict) -> None:
+
+    async def before(
+        self, payload: dict, record: dict, context: Any, ctx: "Context"
+    ) -> None:
         """Hook called before handler execution.
-        
+
         Args:
             payload: Message payload
             record: SQS record
             context: Lambda context
-            ctx: Processing context
+            ctx: Per-record processing Context
+
+        Raising from ``before`` aborts processing for this record (the handler
+        does not run); already-entered middlewares are still unwound via ``after``.
         """
         return None
 
     async def after(
-        self, payload: dict, record: dict, context: Any, ctx: dict, error: Optional[Exception]
+        self,
+        payload: dict,
+        record: dict,
+        context: Any,
+        ctx: "Context",
+        error: Optional[Exception],
     ) -> None:
         """Hook called after handler execution.
-        
+
         Args:
             payload: Message payload
             record: SQS record
             context: Lambda context
-            ctx: Processing context
-            error: Exception if handler failed, None otherwise
+            ctx: Per-record processing Context
+            error: Exception if the handler (or a ``before`` hook) failed, else None
         """
         return None
 
 
 def call_middleware_hook(mw: Middleware, hook: str, *args) -> Awaitable[None]:
     """Call a middleware hook method safely.
-    
+
     Args:
         mw: Middleware instance
         hook: Hook method name ('before' or 'after')
         *args: Arguments to pass to hook
-        
+
     Returns:
         Awaitable that resolves to None
     """
@@ -77,12 +79,12 @@ def call_middleware_hook(mw: Middleware, hook: str, *args) -> Awaitable[None]:
     return _wrap()
 
 
-async def run_middleware_stack(
+async def _run_middleware_stack(
     mws: List[Middleware],
     payload: dict,
     record: dict,
     context: Any,
-    ctx: dict,
+    ctx: "Context",
     call_inner: Callable[[], Awaitable[Any]],
 ) -> Any:
     """Run the before -> inner -> after middleware stack with balanced cleanup.
@@ -111,4 +113,4 @@ async def run_middleware_stack(
                     mw, "after", payload, record, context, ctx, err
                 )
             except Exception as hook_error:
-                mw._log("error", "after middleware hook raised", error=str(hook_error))
+                _logger.error("after middleware hook raised: %s", hook_error)

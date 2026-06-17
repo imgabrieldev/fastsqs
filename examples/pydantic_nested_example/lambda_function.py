@@ -1,4 +1,4 @@
-from fastsqs import FastSQS, SQSRouter, SQSEvent, LoggingMiddleware, TimingMsMiddleware
+from fastsqs import FastSQS, SQSRouter, SQSEvent, LoggingMiddleware, TimingMiddleware
 import json
 
 
@@ -78,9 +78,6 @@ class GenerateReport(SystemEvent):
 
 # Main FastSQS App
 app = FastSQS(
-    title="Pydantic Nested Routing Example",
-    description="Demonstrates nested routing using SQSRouter instances with pydantic models",
-    version="1.0.0",
     debug=True,
 )
 
@@ -91,7 +88,7 @@ system_router = SQSRouter()
 
 # Add middleware to main app
 app.add_middleware(LoggingMiddleware())
-app.add_middleware(TimingMsMiddleware())
+app.add_middleware(TimingMiddleware())
 
 # Include the nested routers
 app.include_router(user_router)

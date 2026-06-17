@@ -55,10 +55,10 @@ def test_mixed_reports_only_failed():
     assert r["batchItemFailures"] == [{"itemIdentifier": "m1"}]
 
 
-# ---- enable_partial_batch_failure=False (regression for bug C) ----
+# ---- partial_batch_failure=False (regression for bug C) ----
 
 def test_partial_disabled_standard_raises_whole_batch():
-    app = FastSQS(enable_partial_batch_failure=False)
+    app = FastSQS(partial_batch_failure=False)
 
     @app.route(Task)
     async def handle(msg: Task):
@@ -70,7 +70,7 @@ def test_partial_disabled_standard_raises_whole_batch():
 
 
 def test_partial_disabled_all_success_returns_empty():
-    app = FastSQS(enable_partial_batch_failure=False)
+    app = FastSQS(partial_batch_failure=False)
 
     @app.route(Task)
     async def handle(msg: Task):
@@ -81,8 +81,7 @@ def test_partial_disabled_all_success_returns_empty():
 
 
 def test_partial_disabled_fifo_raises_whole_batch():
-    app = FastSQS(enable_partial_batch_failure=False)
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(partial_batch_failure=False, queue_type=QueueType.FIFO)
 
     @app.route(Task)
     async def handle(msg: Task):
@@ -101,8 +100,7 @@ def test_partial_disabled_fifo_raises_whole_batch():
     (2, {"m2"}, ["a", "b", "c"]),              # last fails -> only it
 ])
 def test_fifo_failure_position(fail_pos, expected_failed, expected_processed):
-    app = FastSQS()
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(queue_type=QueueType.FIFO)
     processed = []
     ids = ["a", "b", "c"]
     bad = ids[fail_pos]
@@ -119,12 +117,11 @@ def test_fifo_failure_position(fail_pos, expected_failed, expected_processed):
     assert processed == expected_processed
 
 
-def test_fifo_skip_group_on_error_false_halts_whole_batch():
-    """skip_group_on_error=False (Powertools default): first failure halts the
+def test_fifo_halt_batch_mode_halts_whole_batch():
+    """fifo_failure_mode="halt_batch" (Powertools default): first failure halts the
     whole batch in arrival order; the failed record and every record after it
     (any group) are reported and not processed."""
-    app = FastSQS(skip_group_on_error=False)
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(fifo_failure_mode="halt_batch", queue_type=QueueType.FIFO)
     processed = []
 
     @app.route(Task)
@@ -142,8 +139,7 @@ def test_fifo_skip_group_on_error_false_halts_whole_batch():
 
 
 def test_fifo_groups_are_isolated():
-    app = FastSQS()
-    app.set_queue_type(QueueType.FIFO)
+    app = FastSQS(queue_type=QueueType.FIFO)
     processed = []
 
     @app.route(Task)

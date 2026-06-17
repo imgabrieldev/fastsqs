@@ -26,7 +26,7 @@ Complex routing with subrouters. Demonstrates:
 ### 4. [Middleware Example](./middleware_example/)
 Built-in middleware usage. Demonstrates:
 - LoggingMiddleware with field masking
-- TimingMsMiddleware for performance
+- TimingMiddleware for performance
 - Sensitive data handling
 
 ### 5. [Custom Middleware Example](./custom_middleware_example/)

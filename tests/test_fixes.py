@@ -69,15 +69,15 @@ def test_maybe_await_handles_sync_and_async():
     asyncio.run(run())
 
 
-# Registering two event models that collide on a flexible-matching variant warns.
-def test_flexible_match_variant_collision_warns():
+# Registering two event models that resolve to the same message type raises.
+def test_duplicate_message_type_raises():
     class Foo(SQSEvent):
         x: int = 0
 
-    class FOO(SQSEvent):
+    class foo(SQSEvent):  # same message type "foo"
         y: int = 0
 
     app = FastSQS()
     app.route(Foo)(lambda msg: None)
-    with pytest.warns(UserWarning, match="already maps"):
-        app.route(FOO)(lambda msg: None)
+    with pytest.raises(ValueError, match="already exists"):
+        app.route(foo)(lambda msg: None)

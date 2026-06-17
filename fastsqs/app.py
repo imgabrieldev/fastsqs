@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, List, Optional, Type
+from typing import Any, Callable, List, Literal, Optional, Type
 
 from .events import SQSEvent
 from .types import QueueType, Handler
 from .middleware import Middleware
 from .middleware.logging import LoggingMiddleware
 from .routing import SQSRouter
-from .presets import MiddlewarePreset
 from .processing import RecordProcessingMixin
 
 
@@ -22,49 +21,42 @@ class FastSQS(RecordProcessingMixin):
 
     def __init__(
         self,
-        title: str = "FastSQS App",
-        description: str = "",
-        version: str = "1.0.0",
+        *,
         debug: bool = False,
-        queue_type: QueueType = QueueType.STANDARD,
-        message_type_key: str = "type",
-        flexible_matching: bool = True,
+        queue_type: QueueType = QueueType.AUTO,
+        discriminator: str = "type",
+        flexible_matching: bool = False,
         max_concurrent_messages: int = 10,
-        enable_partial_batch_failure: bool = True,
-        skip_group_on_error: bool = True,
+        partial_batch_failure: bool = True,
+        fifo_failure_mode: Literal["isolate_groups", "halt_batch"] = "isolate_groups",
     ):
         """Initialize FastSQS application.
 
         Args:
-            title: Application title
-            description: Application description
-            version: Application version
-            debug: Enable debug mode
-            queue_type: SQS queue type (STANDARD or FIFO)
-            message_type_key: Key to identify message type in payload
-            flexible_matching: Enable flexible message type matching
-            max_concurrent_messages: Maximum concurrent message processing
-            enable_partial_batch_failure: Enable partial batch failure handling
-            skip_group_on_error: FIFO only. True (default): a failed message
-                blocks only the rest of its own messageGroupId; other groups
-                run independently. False: the first failure halts the whole
-                batch (the failed record and every record after it are reported
-                as failures), matching AWS Powertools' default.
+            debug: Enable debug logging.
+            queue_type: ``AUTO`` (default) infers FIFO vs standard from each
+                batch's ``eventSourceARN``; ``STANDARD``/``FIFO`` force it.
+            discriminator: Payload key used to route messages (default ``"type"``).
+            flexible_matching: Allow fuzzy message-type matching (off by default).
+            max_concurrent_messages: Max concurrent records (STANDARD queues only).
+            partial_batch_failure: Report per-record failures (ReportBatchItemFailures).
+                When False, any failure fails the whole batch so SQS redelivers all.
+            fifo_failure_mode: FIFO only. ``"isolate_groups"`` (default): a failed
+                message blocks only the rest of its own messageGroupId; other groups
+                run independently. ``"halt_batch"``: the first failure halts the whole
+                batch (that record and every record after it are reported), matching
+                AWS Powertools' default.
         """
-        self.title = title
-        self.description = description
-        self.version = version
         self.debug = debug
         self.queue_type = queue_type
-        self.message_type_key = message_type_key
+        self.discriminator = discriminator
         self.flexible_matching = flexible_matching
         self.max_concurrent_messages = max_concurrent_messages
-        self.enable_partial_batch_failure = enable_partial_batch_failure
-        self.skip_group_on_error = skip_group_on_error
+        self.partial_batch_failure = partial_batch_failure
+        self.fifo_failure_mode = fifo_failure_mode
 
         self._main_router = SQSRouter(
-            key=self.message_type_key,
-            message_type_key=self.message_type_key,
+            discriminator=self.discriminator,
             flexible_matching=self.flexible_matching,
         )
 
@@ -94,7 +86,7 @@ class FastSQS(RecordProcessingMixin):
         Returns:
             Decorator function for the default handler
         """
-        return self._main_router.route(None)
+        return self._main_router.default()
 
     def include_router(self, router: SQSRouter) -> None:
         """Include an external router in the application.
@@ -110,19 +102,10 @@ class FastSQS(RecordProcessingMixin):
         Args:
             middleware: Middleware instance to add
         """
-        middleware._app = self
         self._middlewares.append(middleware)
 
-    def use(self, middleware: Middleware) -> None:
-        """Alias for add_middleware.
-
-        Args:
-            middleware: Middleware instance to add
-        """
-        self.add_middleware(middleware)
-
     def _log(self, level: str, message: str, **data) -> None:
-        """Internal logging method that routes through LoggingMiddleware.
+        """Route an internal log line through a registered LoggingMiddleware, if any.
 
         Args:
             level: Log level (info, debug, error, etc.)
@@ -130,50 +113,23 @@ class FastSQS(RecordProcessingMixin):
             **data: Additional log data
         """
         for middleware in self._middlewares:
-            if isinstance(middleware, LoggingMiddleware) and hasattr(middleware, "log"):
+            if isinstance(middleware, LoggingMiddleware):
                 middleware.log(level, message, **data)
                 return
 
-    def use_preset(self, preset: str) -> None:
-        """Apply a predefined middleware preset.
+    def _resolve_queue_type(self, records: List[dict]) -> QueueType:
+        """Resolve the effective queue type for a batch.
 
-        Args:
-            preset: Preset name (production, development, minimal)
-
-        Raises:
-            ValueError: If preset name is unknown
+        When ``queue_type`` is ``AUTO``, infer FIFO from the record's
+        ``eventSourceARN`` (``.fifo`` suffix); otherwise honor the explicit type.
         """
-        if preset == "production":
-            middlewares = MiddlewarePreset.production()
-        elif preset == "development":
-            middlewares = MiddlewarePreset.development()
-        elif preset == "minimal":
-            middlewares = MiddlewarePreset.minimal()
-        else:
-            raise ValueError(
-                f"Unknown preset: {preset}. Available: production, development, minimal"
-            )
-
-        for middleware in middlewares:
-            self.add_middleware(middleware)
-
-    def set_queue_type(self, queue_type: QueueType) -> None:
-        """Set the SQS queue type.
-
-        Args:
-            queue_type: Queue type (STANDARD or FIFO)
-        """
-        self.queue_type = queue_type
-        if self.debug:
-            self._log("info", f"Queue type set to: {queue_type.value}")
-
-    def is_fifo_queue(self) -> bool:
-        """Check if the current queue type is FIFO.
-
-        Returns:
-            True if queue type is FIFO, False otherwise
-        """
-        return self.queue_type == QueueType.FIFO
+        if self.queue_type != QueueType.AUTO:
+            return self.queue_type
+        if records:
+            arn = records[0].get("eventSourceARN", "") or ""
+            if arn.endswith(".fifo"):
+                return QueueType.FIFO
+        return QueueType.STANDARD
 
     def handler(self, event: dict, context: Any) -> dict:
         """Main synchronous handler entry point for Lambda.

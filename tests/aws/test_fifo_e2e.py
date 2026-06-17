@@ -5,7 +5,7 @@ A poison message in a FIFO group is isolated to the DLQ. Within a single batch
 fastsqs blocks the tail (preserving order); but once SQS dead-letters the poison
 (maxReceiveCount), the group unblocks and the rest of the group succeeds — so
 ONLY the poison ends up in the DLQ. Other message groups are unaffected
-throughout. The deployed handler runs with skip_group_on_error=True (default).
+throughout. The deployed handler runs with fifo_failure_mode="isolate_groups" (default).
 Harness in conftest.py.
 """
 

@@ -35,7 +35,7 @@ FastSQS App
 
 ### Traditional String-Based Routing
 ```python
-router = SQSRouter("action")  # Routes based on "action" key
+router = SQSRouter(discriminator="action")  # Routes based on "action" key
 
 @router.route("create_user")  # String-based route
 async def handle_create_user(msg):
@@ -45,7 +45,7 @@ async def handle_create_user(msg):
 ### Pydantic Nested Routing (This Example)
 ```python
 app = FastSQS()
-user_router = SQSRouter(message_type_key="type")
+user_router = SQSRouter(discriminator="type")
 app.include_router(user_router)
 
 @user_router.route(CreateUser)  # Nested pydantic model route

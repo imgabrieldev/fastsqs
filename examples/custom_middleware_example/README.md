@@ -22,7 +22,7 @@ python lambda_function.py
 ## What it demonstrates
 
 - Creating custom middleware classes
-- Implementing before/after/error hooks
+- Implementing before/after hooks (handle failures in `after` via the `error` parameter)
 - Error handling and recovery
 - Metrics collection and reporting
 - Custom context management

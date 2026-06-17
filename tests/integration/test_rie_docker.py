@@ -112,7 +112,7 @@ def test_fifo_batch_halts_group(rie):
 
 
 def test_invalid_body_is_a_clean_batch_failure(rie):
-    """A non-JSON body becomes an InvalidMessage -> the record fails cleanly."""
+    """A non-JSON body becomes an InvalidMessageError -> the record fails cleanly."""
     result = _invoke(_load("sqs_invalid_body.json"))
     assert result == {"batchItemFailures": [{"itemIdentifier": "inv-1"}]}
 

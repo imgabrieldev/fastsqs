@@ -1,20 +1,20 @@
 """Handler deployed to a real Lambda by the Tier 2 e2e harness (conftest.py).
 
 Routes Task events; fails task ids starting with "boom"; sleeps for
-"sleep-<n>" (to exercise Lambda timeout). Flips to FIFO mode when records carry
-a messageGroupId. Returns ReportBatchItemFailures.
+"sleep-<n>" (to exercise Lambda timeout). Queue type is inferred from the real
+event-source ARN (QueueType.AUTO). Returns ReportBatchItemFailures.
 """
 
 import asyncio
 
-from fastsqs import FastSQS, SQSEvent, QueueType
+from fastsqs import FastSQS, SQSEvent
 
 
 class Task(SQSEvent):
     task_id: str
 
 
-app = FastSQS()
+app = FastSQS()  # QueueType.AUTO infers FIFO from the .fifo event-source ARN
 
 
 @app.route(Task)
@@ -27,7 +27,4 @@ async def handle(msg: Task):
 
 
 def lambda_handler(event, context):
-    records = event.get("Records", [])
-    is_fifo = any((r.get("attributes", {}) or {}).get("messageGroupId") for r in records)
-    app.set_queue_type(QueueType.FIFO if is_fifo else QueueType.STANDARD)
     return app.handler(event, context)

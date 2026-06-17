@@ -1,6 +1,8 @@
-"""Typed Context (#6): ctx.message_id alongside ctx["messageId"], backward-compat."""
+"""Typed Context (C2): typed framework attributes + a separate ctx.state scratch."""
 
-from fastsqs import FastSQS, SQSEvent, Context, Depends
+import pytest
+
+from fastsqs import FastSQS, SQSEvent, Context, State, QueueType, Depends
 from fastsqs.middleware import Middleware
 from fastsqs.testing import SQSTestClient
 
@@ -9,37 +11,38 @@ class Task(SQSEvent):
     task_id: str
 
 
-def test_typed_attribute_and_dict_access_agree():
+def test_framework_fields_are_typed_attributes():
     seen = {}
     app = FastSQS()
 
     @app.route(Task)
     async def handle(msg: Task, ctx: Context):
-        seen["typed"] = ctx.message_id          # typed
-        seen["dict"] = ctx["messageId"]         # dict — backward compatible
-        seen["qtype"] = ctx.queue_type
+        seen["mid"] = ctx.message_id          # str
+        seen["qtype"] = ctx.queue_type        # QueueType enum
         seen["mtype"] = ctx.message_type
         seen["route"] = ctx.route_path
 
     SQSTestClient(app).send({"type": "task", "task_id": "1"}, message_id="abc")
-    assert seen["typed"] == "abc" == seen["dict"]
-    assert seen["qtype"] == "standard"
+    assert seen["mid"] == "abc"
+    assert seen["qtype"] is QueueType.STANDARD
     assert seen["mtype"] == "task"
-    assert isinstance(seen["route"], list)   # typed list[str]
+    assert isinstance(seen["route"], list)
 
 
-def test_middleware_dict_writes_still_work():
+def test_scratch_lives_in_ctx_state():
     captured = {}
     app = FastSQS()
 
     class MW(Middleware):
         async def before(self, payload, record, context, ctx):
-            ctx["custom"] = "X"                 # dict write
-            ctx.setdefault("acc", []).append(1)  # setdefault
+            ctx.state.custom = "X"                  # attribute write
+            ctx.state["acc"] = [1]                  # item write
+            ctx.state.setdefault("seen", []).append(1)
 
         async def after(self, payload, record, context, ctx, error):
-            captured["custom"] = ctx["custom"]
-            captured["acc"] = ctx["acc"]
+            captured["custom"] = ctx.state.custom   # attribute read
+            captured["acc"] = ctx.state["acc"]      # item read
+            captured["seen"] = ctx.state.get("seen")
 
     app.add_middleware(MW())
 
@@ -48,7 +51,26 @@ def test_middleware_dict_writes_still_work():
         pass
 
     SQSTestClient(app).send({"type": "task", "task_id": "1"})
-    assert captured == {"custom": "X", "acc": [1]}
+    assert captured == {"custom": "X", "acc": [1], "seen": [1]}
+
+
+def test_scratch_cannot_clobber_framework_fields():
+    seen = {}
+    app = FastSQS()
+
+    class MW(Middleware):
+        async def before(self, payload, record, context, ctx):
+            ctx.state.message_id = "SCRATCH"   # writing scratch named like a field
+
+    app.add_middleware(MW())
+
+    @app.route(Task)
+    async def handle(msg: Task, ctx: Context):
+        seen["framework"] = ctx.message_id        # still the real value
+        seen["scratch"] = ctx.state.message_id    # the scratch value
+
+    SQSTestClient(app).send({"type": "task", "task_id": "1"}, message_id="real")
+    assert seen == {"framework": "real", "scratch": "SCRATCH"}
 
 
 def test_typed_context_with_di_together():
@@ -67,8 +89,15 @@ def test_typed_context_with_di_together():
     assert out == {"mid": "m7", "svc": "SVC"}
 
 
-def test_context_is_a_dict():
-    ctx = Context({"messageId": "z"})
-    assert isinstance(ctx, dict)
-    assert ctx.message_id == "z" == ctx["messageId"]
-    assert ctx.handler_result is None        # missing key -> typed default
+def test_state_unit_semantics():
+    st = State({"a": 1})
+    assert st.a == 1 == st["a"]
+    st.b = 2
+    assert st["b"] == 2 and "b" in st
+    st["c"] = 3
+    assert st.c == 3
+    assert st.get("missing") is None
+    assert st.setdefault("d", 4) == 4 and st.d == 4
+    assert set(st) == {"a", "b", "c", "d"}
+    with pytest.raises(AttributeError):
+        _ = st.nope          # attribute miss raises (unlike .get)

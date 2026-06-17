@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, List, Optional, TypedDict, Union, TypeVar
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, Union
+
 from pydantic import BaseModel
+from typing import TypeVar
 
 
 class QueueType(Enum):
-    """Enumeration for SQS queue types."""
+    """SQS queue type. ``AUTO`` (the default) infers FIFO vs standard from the
+    record's ``eventSourceARN`` (a ``.fifo`` suffix means FIFO)."""
+    AUTO = "auto"
     STANDARD = "standard"
     FIFO = "fifo"
 
@@ -23,85 +28,93 @@ T = TypeVar('T', bound=BaseModel)
 """Type variable bound to Pydantic BaseModel."""
 
 
-ProcessingContext = TypedDict(
-    "ProcessingContext",
-    {
-        "messageId": str,
-        "record": dict,
-        "context": Any,
-        "route_path": List[str],
-        "queueType": str,
-        "fifoInfo": dict,
-        "message_type": str,
-        "handler_result": Any,
-        "error_history": List[Any],
-        "dlq_start_time": float,
-        "concurrency_stats": dict,
-        "concurrency_wait_time": float,
-        "visibility_timeout": float,
-        "visibility_warning_time": float,
-        "visibility_start_time": float,
-        "visibility_warned": bool,
-        "visibility_timeout_usage": float,
-        "visibility_monitor_task": Any,
-        "duration_ms": float,
-        "processing_start_time": float,
-        "processing_start_time_ns": int,
-        "processing_duration_seconds": float,
-        "processing_duration_ms": float,
-        "processing_metrics": dict,
-        "metrics_start_time": float,
-        "_parallelization_middleware": Any,
-    },
-    total=False,
-)
-"""Per-message processing context shared across middleware + handlers.
-All keys optional (total=False) — documents the contract, not enforced."""
+@dataclass
+class FifoInfo:
+    """FIFO attributes for a record, parsed from the SQS message attributes."""
+    message_group_id: Optional[str] = None
+    message_deduplication_id: Optional[str] = None
 
 
-class Context(dict):
-    """Per-record processing context passed to handlers and middleware.
+class State:
+    """Mutable per-record scratch namespace for middleware and handlers.
 
-    It IS a ``dict`` — ``ctx["messageId"]`` reads, ``ctx.get(...)``,
-    ``ctx.setdefault(...)`` and middleware writes all keep working unchanged —
-    plus typed attribute access for the common fields, so handlers can write
-    ``ctx.message_id`` (IDE-checkable, ``str``) instead of ``ctx["messageId"]``
-    (``Any``, typo-prone). Dynamic / middleware-internal keys stay reachable via
-    item access. Annotate a handler param ``ctx: Context`` to get the typing.
+    Both ``ctx.state.foo`` and ``ctx.state["foo"]`` work (Litestar-style). This
+    is the ONLY writable surface for arbitrary data — framework-owned fields live
+    as typed attributes on :class:`Context` and cannot be clobbered from here.
+
+    ``ctx.state.foo`` raises ``AttributeError`` if unset; use ``ctx.state.get(...)``
+    for an optional read.
     """
 
-    @property
-    def message_id(self) -> str:
-        return self.get("messageId", "")
+    __slots__ = ("_data",)
 
-    @property
-    def message_type(self) -> Optional[str]:
-        return self.get("message_type")
+    def __init__(self, data: Optional[Dict[str, Any]] = None) -> None:
+        # _data is set via object.__setattr__ so __setattr__ below does not
+        # recurse; refactoring this to a plain attribute breaks copy/pickle.
+        object.__setattr__(self, "_data", dict(data or {}))
 
-    @property
-    def queue_type(self) -> str:
-        return self.get("queueType", "")
+    def __getattr__(self, key: str) -> Any:
+        # Only called on attribute miss (never for _data, which __slots__ owns).
+        try:
+            return self._data[key]
+        except KeyError:
+            raise AttributeError(key)
 
-    @property
-    def record(self) -> dict:
-        return self.get("record", {})
+    def __setattr__(self, key: str, value: Any) -> None:
+        self._data[key] = value
 
-    @property
-    def lambda_context(self) -> Any:
-        return self.get("context")
+    def __delattr__(self, key: str) -> None:
+        try:
+            del self._data[key]
+        except KeyError:
+            raise AttributeError(key)
 
-    @property
-    def route_path(self) -> List[str]:
-        return self.get("route_path", [])
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
 
-    @property
-    def handler_result(self) -> Any:
-        return self.get("handler_result")
+    def __setitem__(self, key: str, value: Any) -> None:
+        self._data[key] = value
 
-    @property
-    def fifo_info(self) -> Optional[dict]:
-        return self.get("fifoInfo")
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
 
-    @property
-    def error_history(self) -> List[Any]:
-        return self.get("error_history", [])
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        return self._data.setdefault(key, default)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return f"State({self._data!r})"
+
+
+@dataclass(eq=False)
+class Context:
+    """Per-record processing context passed to handlers and middleware.
+
+    Framework-owned fields are typed, single-read-path attributes
+    (``ctx.message_id``, ``ctx.queue_type``, ...). Arbitrary middleware/handler
+    scratch goes in the separate :attr:`state` namespace (``ctx.state.foo``),
+    so scratch can never collide with or clobber a framework field. Annotate a
+    handler param ``ctx: Context`` to get the typing.
+
+    ``eq=False`` gives identity semantics (cheap; avoids deep-equality over
+    ``record``/``lambda_context``). Never ``deepcopy`` a Context — ``record`` and
+    the Lambda ``lambda_context`` are not safely copyable; thread the one instance.
+    """
+
+    message_id: str
+    record: dict
+    lambda_context: Any
+    queue_type: QueueType
+    route_path: List[str] = field(default_factory=list)
+    message_type: Optional[str] = None
+    fifo_info: Optional[FifoInfo] = None
+    handler_result: Any = None
+    state: State = field(default_factory=State)

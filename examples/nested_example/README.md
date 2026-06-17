@@ -24,7 +24,7 @@ python lambda_function.py
 - Creating main router with subrouters
 - Hierarchical message routing (action -> entity, action -> db)
 - Built-in middleware integration
-- Wildcard route handling
+- Default route handling
 - Lambda function integration
 
 ## Routing Structure
@@ -33,7 +33,7 @@ python lambda_function.py
 action: create -> entity: user/order
 action: write -> db: rds/cache
 action: update/delete/search -> direct handlers
-action: unknown -> wildcard handler
+action: unknown -> default handler
 ```
 
 ## Expected Output

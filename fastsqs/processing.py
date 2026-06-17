@@ -10,15 +10,14 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from .exceptions import RouteNotFound, InvalidMessage, BatchFailedError
-from .middleware import run_middleware_stack
-from .types import Context
+from .exceptions import RouteNotFoundError, InvalidMessageError, BatchFailedError
+from .middleware.base import _run_middleware_stack
+from .types import Context, FifoInfo, QueueType
 from .utils import group_records_by_message_group
 
 if TYPE_CHECKING:
     from .middleware import Middleware
     from .routing import SQSRouter
-    from .types import QueueType
 
 
 class RecordProcessingMixin:
@@ -26,30 +25,30 @@ class RecordProcessingMixin:
 
     These methods read state owned by the concrete FastSQS class. That state is
     declared below (under TYPE_CHECKING) so the contract is explicit and
-    type-checkable, without introducing a runtime base-class dependency. ``ctx``
-    keys are documented by ``ProcessingContext`` in ``types.py``.
+    type-checkable, without introducing a runtime base-class dependency. The
+    ``ctx`` contract is :class:`~fastsqs.types.Context`.
     """
 
     if TYPE_CHECKING:
         _main_router: "SQSRouter"
         _routers: List["SQSRouter"]
         _middlewares: List["Middleware"]
-        message_type_key: str
-        queue_type: "QueueType"
+        discriminator: str
+        queue_type: QueueType
         debug: bool
         max_concurrent_messages: int
-        enable_partial_batch_failure: bool
-        skip_group_on_error: bool
+        partial_batch_failure: bool
+        fifo_failure_mode: str
 
         def _log(self, level: str, message: str, **data: Any) -> None: ...
-        def is_fifo_queue(self) -> bool: ...
+        def _resolve_queue_type(self, records: List[dict]) -> QueueType: ...
 
     async def _handle_record(self, record: dict, context: Any) -> Optional[Any]:
         """Handle a single SQS record.
 
         Raises:
-            InvalidMessage: If the message body is not a JSON object.
-            RouteNotFound: If no handler matches the message.
+            InvalidMessageError: If the message body is not a JSON object.
+            RouteNotFoundError: If no handler matches the message.
         """
         body_str = record.get("body", "")
         msg_id = record.get("messageId") or record.get("message_id") or "UNKNOWN"
@@ -65,28 +64,27 @@ class RecordProcessingMixin:
         try:
             payload = json.loads(body_str) if body_str else {}
             if not isinstance(payload, dict):
-                raise InvalidMessage("Message body must be a JSON object")
+                raise InvalidMessageError("Message body must be a JSON object")
             self._log("debug", "Parsed payload", msg_id=msg_id, payload=payload)
         except json.JSONDecodeError as e:
             self._log("error", "JSON decode error", msg_id=msg_id, error=str(e))
-            raise InvalidMessage(f"Invalid JSON in message body: {e}")
+            raise InvalidMessageError(f"Invalid JSON in message body: {e}") from e
 
-        ctx: Context = Context({
-            "messageId": msg_id,
-            "record": record,
-            "context": context,
-            "route_path": [],
-            "queueType": self.queue_type.value,
-        })
+        queue_type = self._resolve_queue_type([record])
+        ctx = Context(
+            message_id=msg_id,
+            record=record,
+            lambda_context=context,
+            queue_type=queue_type,
+        )
 
-        if self.is_fifo_queue():
+        if queue_type == QueueType.FIFO:
             attributes = record.get("attributes", {})
-            ctx["fifoInfo"] = {
-                "messageGroupId": attributes.get("messageGroupId"),
-                "messageDeduplicationId": attributes.get("messageDeduplicationId"),
-                "queueType": "fifo",
-            }
-            self._log("debug", "FIFO info", msg_id=msg_id, fifo_info=ctx["fifoInfo"])
+            ctx.fifo_info = FifoInfo(
+                message_group_id=attributes.get("messageGroupId"),
+                message_deduplication_id=attributes.get("messageDeduplicationId"),
+            )
+            self._log("debug", "FIFO info", msg_id=msg_id, fifo_info=ctx.fifo_info)
 
         async def _route() -> Any:
             # Try main router first
@@ -95,7 +93,7 @@ class RecordProcessingMixin:
                 payload, record, context, ctx, root_payload=payload
             ):
                 self._log("debug", "Main router handled the message", msg_id=msg_id)
-                return ctx.get("handler_result")
+                return ctx.handler_result
 
             if self._routers:
                 self._log(
@@ -109,7 +107,7 @@ class RecordProcessingMixin:
                         "debug",
                         f"Trying router {i}",
                         msg_id=msg_id,
-                        router_key=router.key,
+                        router_key=router.discriminator,
                     )
                     if await router.dispatch(
                         payload, record, context, ctx, root_payload=payload
@@ -117,7 +115,7 @@ class RecordProcessingMixin:
                         self._log(
                             "debug", f"Router {i} handled the message", msg_id=msg_id
                         )
-                        return ctx.get("handler_result")
+                        return ctx.handler_result
                     self._log(
                         "debug",
                         f"Router {i} did not handle the message",
@@ -125,13 +123,13 @@ class RecordProcessingMixin:
                     )
 
             available_routes = list(self._main_router._pydantic_routes.keys())
-            available_routers = [r.key for r in self._routers]
-            discriminator = payload.get(self.message_type_key)
+            available_routers = [r.discriminator for r in self._routers]
+            discriminator_value = payload.get(self.discriminator)
             error_msg = (
                 f"No handler found for message "
-                f"({self.message_type_key}={discriminator!r}). "
+                f"({self.discriminator}={discriminator_value!r}). "
                 f"Available FastSQS routes: {available_routes}, "
-                f"Available router keys: {available_routers}"
+                f"Available router discriminators: {available_routers}"
             )
             self._log(
                 "error",
@@ -140,12 +138,12 @@ class RecordProcessingMixin:
                 available_routes=available_routes,
                 available_routers=available_routers,
             )
-            raise RouteNotFound(error_msg)
+            raise RouteNotFoundError(error_msg)
 
         # before -> route -> after, with balanced cleanup: a before-hook raising
         # still unwinds the middlewares that already entered (release slots,
         # cancel monitors), and after-hook errors never mask the real failure.
-        result = await run_middleware_stack(
+        result = await _run_middleware_stack(
             self._middlewares, payload, record, context, ctx, _route
         )
 
@@ -158,11 +156,13 @@ class RecordProcessingMixin:
         if not isinstance(records, list) or not records:
             return {"batchItemFailures": []}
 
+        queue_type = self._resolve_queue_type(records)
+
         if self.debug:
-            queue_info = f"queue_type={self.queue_type.value}, records={len(records)}"
+            queue_info = f"queue_type={queue_type.value}, records={len(records)}"
             self._log("info", "Processing event", queue_info=queue_info)
 
-        if self.is_fifo_queue():
+        if queue_type == QueueType.FIFO:
             result = await self._handle_fifo_event(records, context)
         else:
             result = await self._handle_standard_event(records, context)
@@ -171,10 +171,9 @@ class RecordProcessingMixin:
         # in play: any failure must fail the WHOLE batch so SQS redelivers every
         # message. Returning empty failures here would tell SQS everything
         # succeeded -> silent data loss.
-        if not self.enable_partial_batch_failure and result["batchItemFailures"]:
+        if not self.partial_batch_failure and result["batchItemFailures"]:
             raise BatchFailedError(
-                f"{len(result['batchItemFailures'])} record(s) failed and "
-                "enable_partial_batch_failure is False; failing the whole batch"
+                [f["itemIdentifier"] for f in result["batchItemFailures"]]
             )
         return result
 
@@ -227,7 +226,7 @@ class RecordProcessingMixin:
 
     async def _handle_fifo_event(self, records: List[dict], context: Any) -> dict:
         """Handle records for a FIFO queue with message-group ordering."""
-        if not self.skip_group_on_error:
+        if self.fifo_failure_mode == "halt_batch":
             return await self._handle_fifo_halt_batch(records, context)
 
         failures: List[Dict[str, str]] = []
@@ -297,7 +296,7 @@ class RecordProcessingMixin:
     async def _handle_fifo_halt_batch(
         self, records: List[dict], context: Any
     ) -> dict:
-        """FIFO with skip_group_on_error=False: process the batch in arrival
+        """FIFO with fifo_failure_mode='halt_batch': process the batch in arrival
         order and halt at the first failure, reporting that record and every
         record after it so SQS redelivers the unprocessed tail (matching AWS
         Powertools' default behaviour)."""

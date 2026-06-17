@@ -5,7 +5,7 @@ This example demonstrates how to use FastSQS built-in middleware.
 ## Features
 
 - LoggingMiddleware with field masking
-- TimingMsMiddleware for performance measurement
+- TimingMiddleware for performance measurement
 - Sensitive data handling
 - Built-in middleware integration
 
@@ -29,7 +29,7 @@ python lambda_function.py
 ## Middleware Used
 
 - **LoggingMiddleware**: Masks sensitive fields and logs messages
-- **TimingMsMiddleware**: Measures processing time in milliseconds
+- **TimingMiddleware**: Measures processing time in milliseconds
 
 ## Expected Output
 

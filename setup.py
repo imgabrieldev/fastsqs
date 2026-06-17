@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="fastsqs",
-    version="0.5.0",
+    version="1.0.0",
     description="FastAPI-like, lightweight SQS message processing for Python (routing + middleware + dependency injection)",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -10,7 +10,8 @@ setup(
     author_email="gabriel.lafayette@proton.me",
     url="https://github.com/imgabrieldev/fastsqs",
     packages=find_packages(),
-    install_requires=["pydantic>=2.0.0", "fast-depends>=3.0.0"],
+    package_data={"fastsqs": ["py.typed"]},
+    install_requires=["pydantic>=2.0.0", "fast-depends>=3.0.0,<4.0.0"],
     python_requires=">=3.10",
     license="MIT",
     classifiers=[
@@ -21,7 +22,7 @@ setup(
         "Programming Language :: Python :: 3.13",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: System :: Distributed Computing",

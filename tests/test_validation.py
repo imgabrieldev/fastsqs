@@ -13,7 +13,7 @@ def test_invalid_json_body_fails_the_record():
     async def handle(msg: Order):
         pass
 
-    # body is not valid JSON -> InvalidMessage -> record fails
+    # body is not valid JSON -> InvalidMessageError -> record fails
     event = {"Records": [{"messageId": "m-bad-json", "body": "not json{"}]}
     result = app.handler(event, None)
     assert result == {"batchItemFailures": [{"itemIdentifier": "m-bad-json"}]}

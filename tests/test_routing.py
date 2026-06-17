@@ -26,7 +26,7 @@ def test_routes_by_type_to_handler():
 
 def test_flexible_matching_accepts_camel_case_type():
     seen = []
-    app = FastSQS()
+    app = FastSQS(flexible_matching=True)  # opt-in in v1
 
     @app.route(OrderCreated)
     async def handle(msg: OrderCreated):
@@ -35,6 +35,18 @@ def test_flexible_matching_accepts_camel_case_type():
     SQSTestClient(app).send({"type": "orderCreated", "order_id": "A2"})
 
     assert seen == ["A2"]
+
+
+def test_flexible_matching_off_by_default():
+    # v1 default: a camelCase type does NOT match the snake_case route.
+    app = FastSQS()
+
+    @app.route(OrderCreated)
+    async def handle(msg: OrderCreated):
+        pass
+
+    r = SQSTestClient(app).send({"type": "orderCreated", "order_id": "A2"}, message_id="nx")
+    assert r == {"batchItemFailures": [{"itemIdentifier": "nx"}]}
 
 
 def test_routes_each_type_independently():

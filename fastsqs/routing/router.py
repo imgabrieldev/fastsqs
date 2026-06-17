@@ -1,47 +1,45 @@
 from __future__ import annotations
 
-import inspect
-import warnings
-from typing import Any, Callable, Dict, Iterable, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Type, Union
 from pydantic import BaseModel, ValidationError
 
 from ..events import SQSEvent
-from ..exceptions import InvalidMessage
+from ..exceptions import InvalidMessageError
 from ..types import Handler, RouteValue
-from ..middleware import Middleware, run_middleware_stack
+from ..middleware import Middleware
+from ..middleware.base import _run_middleware_stack
 from ..utils import invoke_handler, maybe_inject
-from .entry import RouteEntry
+from .entry import _RouteEntry
+
+if TYPE_CHECKING:
+    from ..types import Context
 
 
 class SQSRouter:
     """Router for handling SQS messages with multiple routing strategies.
-    
-    Supports both key-value based routing and Pydantic model-based routing
-    with flexible message type matching and nested routing capabilities.
+
+    Supports both pydantic model-based routing and key-value routing, with
+    optional flexible message-type matching and nested subrouters.
     """
-    
+
     def __init__(
         self,
         base_event_class: Optional[Type[BaseModel]] = None,
         *,
-        key: str = "type",
-        name: Optional[str] = None,
+        discriminator: str = "type",
         payload_scope: str = "root",
         inherit_middlewares: bool = True,
-        message_type_key: str = "type",
-        flexible_matching: bool = True,
+        flexible_matching: bool = False,
     ):
         """Initialize SQS router.
-        
+
         Args:
             base_event_class: Optional base event class for validation
-            key: Key to use for routing in payload
-            name: Optional router name
+            discriminator: Payload key used to route messages (default ``"type"``)
             payload_scope: Payload scope ('current', 'root', or 'both')
             inherit_middlewares: Whether to inherit parent middlewares
-            message_type_key: Key for message type identification
-            flexible_matching: Enable flexible message type matching
-            
+            flexible_matching: Enable fuzzy message-type matching (off by default)
+
         Raises:
             ValueError: If payload_scope is not valid
         """
@@ -49,17 +47,14 @@ class SQSRouter:
             raise ValueError("payload_scope must be 'current', 'root', or 'both'")
 
         self.base_event_class = base_event_class
-        self.key = key
-        self.name = name or key
+        self.discriminator = discriminator
         self.payload_scope = payload_scope
         self.inherit_middlewares = inherit_middlewares
-        self.message_type_key = message_type_key
         self.flexible_matching = flexible_matching
 
-        self._routes: Dict[str, RouteEntry] = {}
+        self._routes: Dict[str, _RouteEntry] = {}
         self._middlewares: List[Middleware] = []
         self._default_handler: Optional[Handler] = None
-        self._wildcard_handler: Optional[Handler] = None
 
         self._pydantic_routes: Dict[
             str, tuple[Type[BaseModel], Handler, List[Middleware]]
@@ -74,17 +69,17 @@ class SQSRouter:
         middlewares: Optional[List[Middleware]] = None,
     ) -> Callable[[Handler], Handler]:
         """Register a route handler.
-        
+
         Args:
-            value: Route value(s) or Pydantic model class
-            model: Optional Pydantic model for validation
+            value: Route value(s), a Pydantic model class, or None for the default
+            model: Optional Pydantic model for validation (key-value routes)
             middlewares: Optional list of middlewares
-            
+
         Returns:
             Decorator function for the handler
-            
+
         Raises:
-            ValueError: If event model is invalid or duplicate handler exists
+            ValueError: If event model is invalid or a duplicate/colliding route exists
         """
         # Handle pydantic model routing (like FastSQS.route)
         if (
@@ -128,10 +123,10 @@ class SQSRouter:
                         if existing is None:
                             self._route_lookup[variant] = primary_type
                         elif existing != primary_type:
-                            warnings.warn(
-                                f"fastsqs: message-type variant '{variant}' already maps to "
-                                f"'{existing}'; ignoring collision from '{primary_type}'",
-                                stacklevel=2,
+                            raise ValueError(
+                                f"fastsqs: message-type variant '{variant}' maps to "
+                                f"both '{existing}' and '{primary_type}'; rename one "
+                                "event class or disable flexible_matching"
                             )
 
                 return handler
@@ -140,12 +135,7 @@ class SQSRouter:
 
         # Handle default route (no value)
         if value is None:
-
-            def default_decorator(fn: Handler) -> Handler:
-                self._default_handler = maybe_inject(fn)
-                return fn
-
-            return default_decorator
+            return self.default(middlewares=middlewares)
 
         # Handle string/int value routing
         values = [value] if isinstance(value, (str, int)) else list(value)
@@ -157,28 +147,50 @@ class SQSRouter:
                 if k in self._routes:
                     existing = self._routes[k]
                     if existing.handler is not None:
-                        raise ValueError(f"Duplicate handler for {self.key}={k}")
+                        raise ValueError(
+                            f"Duplicate handler for {self.discriminator}={k}"
+                        )
                     existing.handler = injected
                     existing.model = model
                     existing.middlewares = list(middlewares or [])
                 else:
-                    self._routes[k] = RouteEntry(
+                    self._routes[k] = _RouteEntry(
                         handler=injected, model=model, middlewares=list(middlewares or [])
                     )
             return fn
 
         return value_decorator
 
+    def default(
+        self,
+        *,
+        middlewares: Optional[List[Middleware]] = None,
+    ) -> Callable[[Handler], Handler]:
+        """Register the default handler for messages that match no route.
+
+        Args:
+            middlewares: Optional list of middlewares (currently advisory; the
+                default handler runs under the router/app middleware chain).
+
+        Returns:
+            Decorator function for the default handler.
+        """
+        def default_decorator(fn: Handler) -> Handler:
+            self._default_handler = maybe_inject(fn)
+            return fn
+
+        return default_decorator
+
     def _find_pydantic_route(
         self, message_type: str
     ) -> Optional[tuple[Type[BaseModel], Handler, List[Middleware]]]:
         """Find a pydantic route by message type.
-        
+
         Args:
             message_type: Message type to search for
-            
+
         Returns:
-            Tuple of (model_class, handler) if found, None otherwise
+            Tuple of (model_class, handler, middlewares) if found, None otherwise
         """
         if message_type in self._pydantic_routes:
             return self._pydantic_routes[message_type]
@@ -189,41 +201,17 @@ class SQSRouter:
 
         return None
 
-    def wildcard(
-        self,
-        model: Optional[type[BaseModel]] = None,
-        middlewares: Optional[List[Middleware]] = None,
-    ) -> Callable[[Handler], Handler]:
-        """Register a wildcard handler for unmatched routes.
-        
-        Args:
-            model: Optional Pydantic model for validation
-            middlewares: Optional list of middlewares
-            
-        Returns:
-            Decorator function for the handler
-        """
-        def decorator(fn: Handler) -> Handler:
-            self._wildcard_handler = fn
-            if "*" not in self._routes:
-                self._routes["*"] = RouteEntry(
-                    handler=maybe_inject(fn), model=model, middlewares=list(middlewares or [])
-                )
-            return fn
-
-        return decorator
-
     def subrouter(
         self,
         value: Union[RouteValue, Iterable[RouteValue]],
         router: Optional["SQSRouter"] = None,
     ) -> Union["SQSRouter", Callable[["SQSRouter"], "SQSRouter"]]:
         """Register a subrouter for nested routing.
-        
+
         Args:
             value: Route value(s) to associate with subrouter
             router: Optional router instance
-            
+
         Returns:
             Router instance or decorator function
         """
@@ -235,7 +223,7 @@ class SQSRouter:
                 if k in self._routes:
                     self._routes[k].subrouter = router
                 else:
-                    self._routes[k] = RouteEntry(subrouter=router)
+                    self._routes[k] = _RouteEntry(subrouter=router)
             return router
 
         def decorator(
@@ -251,14 +239,14 @@ class SQSRouter:
                 if k in self._routes:
                     self._routes[k].subrouter = router_instance
                 else:
-                    self._routes[k] = RouteEntry(subrouter=router_instance)
+                    self._routes[k] = _RouteEntry(subrouter=router_instance)
             return router_instance
 
         return decorator
 
     def add_middleware(self, mw: Middleware) -> None:
         """Add middleware to this router.
-        
+
         Args:
             mw: Middleware instance to add
         """
@@ -269,25 +257,25 @@ class SQSRouter:
         payload: dict,
         record: dict,
         context: Any,
-        ctx: dict,
+        ctx: "Context",
         root_payload: Optional[dict] = None,
         parent_middlewares: Optional[List[Middleware]] = None,
     ) -> bool:
         """Dispatch a message to the appropriate handler.
-        
+
         Args:
             payload: Message payload dictionary
             record: SQS record dictionary
             context: Lambda context object
-            ctx: Processing context dictionary
+            ctx: Per-record processing Context
             root_payload: Original root payload
             parent_middlewares: Middlewares from parent routers
-            
+
         Returns:
             True if message was handled, False otherwise
-            
+
         Raises:
-            InvalidMessage: If message validation fails
+            InvalidMessageError: If message validation fails
         """
         if root_payload is None:
             root_payload = payload
@@ -295,16 +283,16 @@ class SQSRouter:
         if parent_middlewares is None:
             parent_middlewares = []
 
-        # First try pydantic-based routing (using message_type_key).
+        # First try pydantic-based routing (using the discriminator key).
         # Route through _execute_handler so router-level and per-route
         # middlewares run for pydantic routes exactly as they do for
-        # key-value routes (validation + InvalidMessage handling included).
-        message_type = payload.get(self.message_type_key)
+        # key-value routes (validation + InvalidMessageError handling included).
+        message_type = payload.get(self.discriminator)
         if message_type:
             pydantic_route = self._find_pydantic_route(message_type)
             if pydantic_route:
                 event_model, handler, route_middlewares = pydantic_route
-                ctx["message_type"] = message_type
+                ctx.message_type = message_type
                 await self._execute_handler(
                     handler,
                     event_model,
@@ -318,8 +306,8 @@ class SQSRouter:
                 )
                 return True
 
-        # Then try key-value based routing (original logic)
-        key_value = payload.get(self.key)
+        # Then try key-value based routing
+        key_value = payload.get(self.discriminator)
         if key_value is None:
             # Discriminator missing or explicitly null: let the default handler
             # (if any) catch it, mirroring the "no matching route" path below.
@@ -340,13 +328,10 @@ class SQSRouter:
 
         str_value = str(key_value)
 
-        route_path = ctx.setdefault("route_path", [])
-        route_path.append(f"{self.key}={str_value}")
+        route_path = ctx.route_path
+        route_path.append(f"{self.discriminator}={str_value}")
 
         entry = self._routes.get(str_value)
-
-        if entry is None and self._wildcard_handler:
-            entry = self._routes.get("*")
 
         if entry is None:
             if self._default_handler:
@@ -406,12 +391,12 @@ class SQSRouter:
         payload: dict,
         record: dict,
         context: Any,
-        ctx: dict,
+        ctx: "Context",
         root_payload: dict,
         parent_middlewares: List[Middleware],
     ) -> None:
-        """Execute a handler with middleware chain.
-        
+        """Execute a handler with the middleware chain.
+
         Args:
             handler: Handler function to execute
             model: Optional Pydantic model for validation
@@ -419,42 +404,32 @@ class SQSRouter:
             payload: Message payload
             record: SQS record
             context: Lambda context
-            ctx: Processing context
+            ctx: Per-record processing Context
             root_payload: Original root payload
             parent_middlewares: Parent router middlewares
-            
+
         Raises:
-            ValidationError: If model validation fails
+            InvalidMessageError: If model validation fails
         """
         all_mws = parent_middlewares + self._middlewares + route_middlewares
 
-        if self.payload_scope == "root":
+        if self.payload_scope == "both":
             handler_payload = root_payload
-        elif self.payload_scope == "both":
-            handler_payload = root_payload
-        else:
+        elif self.payload_scope == "current":
             handler_payload = payload
+        else:  # "root"
+            handler_payload = root_payload
 
         async def _invoke() -> Any:
             if model is not None:
                 try:
                     msg = model.model_validate(payload)
                 except ValidationError as e:
-                    raise InvalidMessage(f"Validation failed for {self.key}: {e}")
+                    raise InvalidMessageError(
+                        f"Validation failed for {self.discriminator}: {e}"
+                    ) from e
             else:
-                sig = inspect.signature(handler)
-                params = list(sig.parameters.values())
-
-                if params and hasattr(params[0].annotation, "model_validate"):
-                    model_class = params[0].annotation
-                    try:
-                        msg = model_class.model_validate(payload)
-                    except ValidationError as e:
-                        raise InvalidMessage(
-                            f"Validation failed for {model_class.__name__}: {e}"
-                        )
-                else:
-                    msg = SQSEvent.model_validate(payload)
+                msg = SQSEvent.model_validate(payload)
 
             # invoke_handler matches kwargs to the handler's signature by name,
             # so a single call covers every supported handler shape
@@ -467,10 +442,10 @@ class SQSRouter:
                 context=context,
                 ctx=ctx,
             )
-            ctx["handler_result"] = result
+            ctx.handler_result = result
             return result
 
         # before -> invoke -> after, unwinding only middlewares that entered.
-        await run_middleware_stack(
+        await _run_middleware_stack(
             all_mws, handler_payload, record, context, ctx, _invoke
         )

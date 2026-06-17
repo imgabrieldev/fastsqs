@@ -1,57 +1,46 @@
 """Timing middleware for measuring message processing duration."""
 
+import logging
 import time
+
 from .base import Middleware
 
+_logger = logging.getLogger("fastsqs")
 
-class TimingMsMiddleware(Middleware):
-    """Middleware that measures and logs message processing duration.
-    
-    Records start time before processing and calculates duration after,
-    storing the result in the processing context.
+
+class TimingMiddleware(Middleware):
+    """Middleware that measures message processing duration.
+
+    Records a start time before processing and stores the duration (ms) in
+    ``ctx.state`` after, so downstream middleware/handlers can read it.
     """
-    
-    def __init__(self, store_key_start: str = "start_ns", store_key_ms: str = "duration_ms"):
+
+    def __init__(
+        self, store_key_start: str = "start_ns", store_key_ms: str = "duration_ms"
+    ):
         """Initialize timing middleware.
-        
+
         Args:
-            store_key_start: Context key for storing start time
-            store_key_ms: Context key for storing duration in milliseconds
+            store_key_start: ``ctx.state`` key for the start time
+            store_key_ms: ``ctx.state`` key for the duration in milliseconds
         """
-        super().__init__()
         self.store_key_start = store_key_start
         self.store_key_ms = store_key_ms
 
     async def before(self, payload, record, context, ctx):
-        """Record processing start time.
-        
-        Args:
-            payload: Message payload
-            record: SQS record
-            context: Lambda context
-            ctx: Processing context
-        """
-        msg_id = record.get("messageId", "UNKNOWN")
-        ctx[self.store_key_start] = time.perf_counter_ns()
-        self._log("debug", "Processing started", msg_id=msg_id)
+        """Record processing start time in ``ctx.state``."""
+        ctx.state[self.store_key_start] = time.perf_counter_ns()
 
     async def after(self, payload, record, context, ctx, error):
-        """Calculate and log processing duration.
-        
-        Args:
-            payload: Message payload
-            record: SQS record
-            context: Lambda context
-            ctx: Processing context
-            error: Exception if processing failed
-        """
+        """Compute and store processing duration in ``ctx.state``."""
         msg_id = record.get("messageId", "UNKNOWN")
-        start = ctx.get(self.store_key_start)
+        # .get (not attribute) — before may not have run during an unwind.
+        start = ctx.state.get(self.store_key_start)
         if start is not None:
-            dur_ns = time.perf_counter_ns() - start
-            duration_ms = round(dur_ns / 1_000_000, 3)
-            ctx[self.store_key_ms] = duration_ms
-            
+            duration_ms = round((time.perf_counter_ns() - start) / 1_000_000, 3)
+            ctx.state[self.store_key_ms] = duration_ms
             status = "FAILED" if error else "SUCCESS"
-            self._log("info", "Processing completed", 
-                     msg_id=msg_id, status=status, duration_ms=duration_ms)
+            _logger.info(
+                "Processing completed msg_id=%s status=%s duration_ms=%s",
+                msg_id, status, duration_ms,
+            )

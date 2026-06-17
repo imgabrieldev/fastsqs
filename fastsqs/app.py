@@ -31,6 +31,7 @@ class FastSQS(RecordProcessingMixin):
         flexible_matching: bool = True,
         max_concurrent_messages: int = 10,
         enable_partial_batch_failure: bool = True,
+        skip_group_on_error: bool = True,
     ):
         """Initialize FastSQS application.
 
@@ -44,6 +45,11 @@ class FastSQS(RecordProcessingMixin):
             flexible_matching: Enable flexible message type matching
             max_concurrent_messages: Maximum concurrent message processing
             enable_partial_batch_failure: Enable partial batch failure handling
+            skip_group_on_error: FIFO only. True (default): a failed message
+                blocks only the rest of its own messageGroupId; other groups
+                run independently. False: the first failure halts the whole
+                batch (the failed record and every record after it are reported
+                as failures), matching AWS Powertools' default.
         """
         self.title = title
         self.description = description
@@ -54,6 +60,7 @@ class FastSQS(RecordProcessingMixin):
         self.flexible_matching = flexible_matching
         self.max_concurrent_messages = max_concurrent_messages
         self.enable_partial_batch_failure = enable_partial_batch_failure
+        self.skip_group_on_error = skip_group_on_error
 
         self._main_router = SQSRouter(
             key=self.message_type_key,

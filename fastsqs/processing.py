@@ -38,6 +38,7 @@ class RecordProcessingMixin:
         debug: bool
         max_concurrent_messages: int
         enable_partial_batch_failure: bool
+        skip_group_on_error: bool
 
         def _log(self, level: str, message: str, **data: Any) -> None: ...
         def is_fifo_queue(self) -> bool: ...
@@ -225,6 +226,9 @@ class RecordProcessingMixin:
 
     async def _handle_fifo_event(self, records: List[dict], context: Any) -> dict:
         """Handle records for a FIFO queue with message-group ordering."""
+        if not self.skip_group_on_error:
+            return await self._handle_fifo_halt_batch(records, context)
+
         failures: List[Dict[str, str]] = []
 
         message_groups = group_records_by_message_group(records)
@@ -287,6 +291,34 @@ class RecordProcessingMixin:
                         "error", "Message group processing failed", error=str(result)
                     )
 
+        return {"batchItemFailures": failures}
+
+    async def _handle_fifo_halt_batch(
+        self, records: List[dict], context: Any
+    ) -> dict:
+        """FIFO with skip_group_on_error=False: process the batch in arrival
+        order and halt at the first failure, reporting that record and every
+        record after it so SQS redelivers the unprocessed tail (matching AWS
+        Powertools' default behaviour)."""
+        failures: List[Dict[str, str]] = []
+        halted = False
+        for rec in records:
+            if halted:
+                failures.append({"itemIdentifier": rec.get("messageId", "UNKNOWN")})
+                continue
+            try:
+                await self._handle_record(rec, context)
+            except Exception as e:
+                halted = True
+                msg_id = rec.get("messageId", "UNKNOWN")
+                if self.debug:
+                    self._log(
+                        "error",
+                        "FIFO batch halted on failure",
+                        msg_id=msg_id,
+                        error=str(e),
+                    )
+                failures.append({"itemIdentifier": msg_id})
         return {"batchItemFailures": failures}
 
     async def _handle_record_safe(self, record: dict, context: Any) -> None:

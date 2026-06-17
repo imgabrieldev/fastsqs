@@ -113,3 +113,17 @@ def test_sync_callback_accepted_by_middleware():
     result = SQSTestClient(app).send({"type": "task", "task_id": "1"})
     assert result == {"batchItemFailures": []}
     assert len(seen) == 1
+
+
+# LOW — registering two event models that collide on a flexible-matching variant warns.
+def test_flexible_match_variant_collision_warns():
+    class Foo(SQSEvent):
+        x: int = 0
+
+    class FOO(SQSEvent):
+        y: int = 0
+
+    app = FastSQS()
+    app.route(Foo)(lambda msg: None)  # first registration: no collision
+    with pytest.warns(UserWarning, match="already maps"):
+        app.route(FOO)(lambda msg: None)  # shares a flexible-matching variant -> warns

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type, Union
 from pydantic import BaseModel, ValidationError
 
+from ..events import SQSEvent
+from ..exceptions import InvalidMessage
 from ..types import Handler, RouteValue
 from ..middleware import Middleware, run_middlewares
 from ..utils import invoke_handler
@@ -87,8 +90,6 @@ class SQSRouter:
             and isinstance(value, type)
             and issubclass(value, BaseModel)
         ):
-            from ..events import SQSEvent
-
             if not issubclass(value, SQSEvent):
                 raise ValueError(
                     f"event_model must be a subclass of SQSEvent, got {value}"
@@ -117,8 +118,15 @@ class SQSRouter:
                 if self.flexible_matching:
                     variants = value.get_message_type_variants()
                     for variant in variants:
-                        if variant not in self._route_lookup:
+                        existing = self._route_lookup.get(variant)
+                        if existing is None:
                             self._route_lookup[variant] = primary_type
+                        elif existing != primary_type:
+                            warnings.warn(
+                                f"fastsqs: message-type variant '{variant}' already maps to "
+                                f"'{existing}'; ignoring collision from '{primary_type}'",
+                                stacklevel=2,
+                            )
 
                 # Store middlewares if provided
                 if middlewares:
@@ -310,8 +318,6 @@ class SQSRouter:
             if pydantic_route:
                 event_model, handler = pydantic_route
                 try:
-                    from ..exceptions import InvalidMessage
-
                     event_instance = event_model.model_validate(payload)
                     ctx["message_type"] = message_type
                     result = await invoke_handler(
@@ -453,8 +459,6 @@ class SQSRouter:
                             f"Validation failed for {model_class.__name__}: {e}"
                         )
                 else:
-                    from ..events import SQSEvent
-
                     msg = SQSEvent.model_validate(payload)
 
             sig = inspect.signature(handler)

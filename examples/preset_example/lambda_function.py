@@ -14,9 +14,8 @@ class UserRegistration(SQSEvent):
 
 app = FastSQS()
 
-app.use_preset("production", 
+app.use_preset("production",
     max_concurrent=15,
-    retry_attempts=3,
     visibility_timeout=45.0
 )
 

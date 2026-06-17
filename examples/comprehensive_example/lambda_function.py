@@ -3,7 +3,7 @@ import asyncio
 from typing import Dict, Any, List
 from fastsqs import FastSQS, SQSEvent
 from fastsqs.middleware import (
-    ErrorHandlingMiddleware, RetryConfig, DeadLetterQueueMiddleware,
+    ErrorHandlingMiddleware, CircuitBreaker, DeadLetterQueueMiddleware,
     VisibilityTimeoutMonitor, ProcessingTimeMiddleware,
     ParallelizationMiddleware, ParallelizationConfig,
     TimingMsMiddleware, LoggingMiddleware
@@ -25,15 +25,11 @@ class CriticalMessage(SQSEvent):
 
 app = FastSQS()
 
-# Configure comprehensive middleware stack
-retry_config = RetryConfig(
-    max_retries=3,
-    base_delay=1.0,
-    max_delay=60.0,
-    exponential_backoff=True,
-    retry_exceptions=[ValueError, ConnectionError]
-)
-error_middleware = ErrorHandlingMiddleware(retry_config)
+# Configure comprehensive middleware stack. Retries are handled by SQS
+# (visibility timeout + redelivery); this middleware trips a circuit breaker
+# and routes terminal failures to the dead-letter handler.
+circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
+error_middleware = ErrorHandlingMiddleware(circuit_breaker=circuit_breaker)
 dlq_middleware = DeadLetterQueueMiddleware(max_processing_time=300.0)
 
 visibility_monitor = VisibilityTimeoutMonitor(

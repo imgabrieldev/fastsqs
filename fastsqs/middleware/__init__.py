@@ -3,7 +3,7 @@
 from .base import Middleware, run_middlewares
 from .timing import TimingMsMiddleware
 from .logging import LoggingMiddleware
-from .error_handling import ErrorHandlingMiddleware, RetryConfig, CircuitBreaker, DeadLetterQueueMiddleware
+from .error_handling import ErrorHandlingMiddleware, CircuitBreaker, DeadLetterQueueMiddleware
 from .visibility import VisibilityTimeoutMonitor, ProcessingTimeMiddleware, QueueMetricsMiddleware
 from .parallelization import ParallelizationMiddleware, ConcurrencyLimiter, ResourcePool, ParallelizationConfig, LoadBalancingMiddleware
 
@@ -13,7 +13,6 @@ __all__ = [
     "TimingMsMiddleware",
     "LoggingMiddleware",
     "ErrorHandlingMiddleware",
-    "RetryConfig",
     "CircuitBreaker",
     "DeadLetterQueueMiddleware",
     "VisibilityTimeoutMonitor",

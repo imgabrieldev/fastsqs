@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import asyncio
-from typing import Any, Awaitable, Dict, Optional, List, Callable, Union
+from typing import Any, Awaitable, Optional, Callable, Union
 from .base import Middleware
 from ..utils import maybe_await
 
@@ -39,7 +39,7 @@ class VisibilityTimeoutMonitor(Middleware):
     def _default_warning_callback(self, payload: dict, record: dict, elapsed: float, timeout: float) -> None:
         msg_id = record.get("messageId", "UNKNOWN")
         remaining = timeout - elapsed
-        self._log("warning", f"Message approaching timeout", 
+        self._log("warning", "Message approaching timeout", 
                  msg_id=msg_id, elapsed=elapsed, remaining=remaining, 
                  usage_percent=(elapsed/timeout)*100)
     
@@ -60,7 +60,7 @@ class VisibilityTimeoutMonitor(Middleware):
         visibility_timeout = self._extract_visibility_timeout(record)
         warning_time = visibility_timeout * self.warning_threshold
         
-        self._log("info", f"Starting visibility monitoring", 
+        self._log("info", "Starting visibility monitoring", 
                  msg_id=msg_id, timeout=visibility_timeout, warning_at=warning_time)
         
         ctx["visibility_timeout"] = visibility_timeout
@@ -81,7 +81,7 @@ class VisibilityTimeoutMonitor(Middleware):
             try:
                 await monitor_task
             except asyncio.CancelledError:
-                self._log("debug", f"Monitor task cancelled", msg_id=msg_id)
+                self._log("debug", "Monitor task cancelled", msg_id=msg_id)
         
         start_time = ctx.get("visibility_start_time")
         if start_time:
@@ -91,12 +91,12 @@ class VisibilityTimeoutMonitor(Middleware):
             
             ctx["visibility_timeout_usage"] = total_time / visibility_timeout
             
-            self._log("info", f"Processing completed", 
+            self._log("info", "Processing completed", 
                      msg_id=msg_id, total_time=total_time, 
                      timeout=visibility_timeout, usage_percent=usage_percent)
             
             if total_time > visibility_timeout:
-                self._log("error", f"Message exceeded visibility timeout!", 
+                self._log("error", "Message exceeded visibility timeout!", 
                          msg_id=msg_id, processing_time=total_time, timeout=visibility_timeout)
     
     async def _monitor_visibility_timeout(self, payload: dict, record: dict, ctx: dict) -> None:
@@ -118,7 +118,7 @@ class VisibilityTimeoutMonitor(Middleware):
                         try:
                             await maybe_await(self.extend_timeout_callback(payload, record, elapsed))
                         except Exception as e:
-                            self._log("warning", f"Failed to extend timeout", error=str(e))
+                            self._log("warning", "Failed to extend timeout", error=str(e))
                 
                 if elapsed > visibility_timeout:
                     break
@@ -126,7 +126,7 @@ class VisibilityTimeoutMonitor(Middleware):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            self._log("error", f"Monitor error", error=str(e))
+            self._log("error", "Monitor error", error=str(e))
 
 
 class ProcessingTimeMiddleware(Middleware):
@@ -181,7 +181,7 @@ class ProcessingTimeMiddleware(Middleware):
         
         if duration_seconds > self.slow_processing_threshold:
             msg_id = record.get("messageId", "UNKNOWN")
-            self._log("warning", f"Slow processing detected", 
+            self._log("warning", "Slow processing detected", 
                      msg_id=msg_id, duration=duration_seconds)
         
         if self.store_detailed_metrics:
@@ -199,7 +199,7 @@ class ProcessingTimeMiddleware(Middleware):
                 try:
                     await maybe_await(self.metrics_callback(metrics))
                 except Exception as e:
-                    self._log("error", f"Metrics callback error", error=str(e))
+                    self._log("error", "Metrics callback error", error=str(e))
 class QueueMetricsMiddleware(Middleware):
     """Middleware for aggregating and emitting queue-level metrics.
     
@@ -232,7 +232,7 @@ class QueueMetricsMiddleware(Middleware):
         }
     
     def _default_emit_metrics(self, metrics: dict) -> None:
-        self._log("info", f"Queue metrics", **metrics)
+        self._log("info", "Queue metrics", **metrics)
     
     async def before(self, payload: dict, record: dict, context: Any, ctx: dict) -> None:
         ctx["metrics_start_time"] = time.time()

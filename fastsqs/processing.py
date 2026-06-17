@@ -8,16 +8,39 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .exceptions import RouteNotFound, InvalidMessage
 from .middleware import run_middlewares
-from .types import ProcessingContext
 from .utils import group_records_by_message_group
+
+if TYPE_CHECKING:
+    from .middleware import Middleware
+    from .routing import SQSRouter
+    from .types import QueueType
 
 
 class RecordProcessingMixin:
-    """SQS record/batch processing for FastSQS (mixed into the app class)."""
+    """SQS record/batch processing for FastSQS (mixed into the app class).
+
+    These methods read state owned by the concrete FastSQS class. That state is
+    declared below (under TYPE_CHECKING) so the contract is explicit and
+    type-checkable, without introducing a runtime base-class dependency. ``ctx``
+    keys are documented by ``ProcessingContext`` in ``types.py``.
+    """
+
+    if TYPE_CHECKING:
+        _main_router: "SQSRouter"
+        _routers: List["SQSRouter"]
+        _middlewares: List["Middleware"]
+        message_type_key: str
+        queue_type: "QueueType"
+        debug: bool
+        max_concurrent_messages: int
+        enable_partial_batch_failure: bool
+
+        def _log(self, level: str, message: str, **data: Any) -> None: ...
+        def is_fifo_queue(self) -> bool: ...
 
     async def _handle_record(self, record: dict, context: Any) -> Optional[Any]:
         """Handle a single SQS record.
@@ -29,10 +52,10 @@ class RecordProcessingMixin:
         body_str = record.get("body", "")
         msg_id = record.get("messageId") or record.get("message_id") or "UNKNOWN"
 
-        self._log("info", f"Starting record processing", msg_id=msg_id)
+        self._log("info", "Starting record processing", msg_id=msg_id)
         self._log(
             "debug",
-            f"Raw body",
+            "Raw body",
             msg_id=msg_id,
             body=body_str[:500] + ("..." if len(body_str) > 500 else ""),
         )
@@ -41,12 +64,12 @@ class RecordProcessingMixin:
             payload = json.loads(body_str) if body_str else {}
             if not isinstance(payload, dict):
                 raise InvalidMessage("Message body must be a JSON object")
-            self._log("debug", f"Parsed payload", msg_id=msg_id, payload=payload)
+            self._log("debug", "Parsed payload", msg_id=msg_id, payload=payload)
         except json.JSONDecodeError as e:
-            self._log("error", f"JSON decode error", msg_id=msg_id, error=str(e))
+            self._log("error", "JSON decode error", msg_id=msg_id, error=str(e))
             raise InvalidMessage(f"Invalid JSON in message body: {e}")
 
-        ctx: ProcessingContext = {
+        ctx: Dict[str, Any] = {
             "messageId": msg_id,
             "record": record,
             "context": context,
@@ -61,33 +84,33 @@ class RecordProcessingMixin:
                 "messageDeduplicationId": attributes.get("messageDeduplicationId"),
                 "queueType": "fifo",
             }
-            self._log("debug", f"FIFO info", msg_id=msg_id, fifo_info=ctx["fifoInfo"])
+            self._log("debug", "FIFO info", msg_id=msg_id, fifo_info=ctx["fifoInfo"])
 
         err: Optional[Exception] = None
         result: Any = None
 
-        self._log("debug", f"Running 'before' middleware chain", msg_id=msg_id)
+        self._log("debug", "Running 'before' middleware chain", msg_id=msg_id)
         await run_middlewares(
             self._middlewares, "before", payload, record, context, ctx
         )
-        self._log("debug", f"'before' middleware chain completed", msg_id=msg_id)
+        self._log("debug", "'before' middleware chain completed", msg_id=msg_id)
 
         try:
             handled = False
 
             # Try main router first
-            self._log("debug", f"Trying main router", msg_id=msg_id)
+            self._log("debug", "Trying main router", msg_id=msg_id)
             if await self._main_router.dispatch(
                 payload, record, context, ctx, root_payload=payload
             ):
-                self._log("debug", f"Main router handled the message", msg_id=msg_id)
+                self._log("debug", "Main router handled the message", msg_id=msg_id)
                 handled = True
                 result = ctx.get("handler_result")
 
             if not handled and self._routers:
                 self._log(
                     "debug",
-                    f"Trying routers",
+                    "Trying routers",
                     msg_id=msg_id,
                     router_count=len(self._routers),
                 )
@@ -136,7 +159,7 @@ class RecordProcessingMixin:
         except Exception as e:
             self._log(
                 "error",
-                f"Handler error",
+                "Handler error",
                 msg_id=msg_id,
                 error_type=type(e).__name__,
                 error=str(e),
@@ -144,13 +167,13 @@ class RecordProcessingMixin:
             err = e
             raise
         finally:
-            self._log("debug", f"Running 'after' middleware chain", msg_id=msg_id)
+            self._log("debug", "Running 'after' middleware chain", msg_id=msg_id)
             await run_middlewares(
                 self._middlewares, "after", payload, record, context, ctx, err
             )
-            self._log("debug", f"'after' middleware chain completed", msg_id=msg_id)
+            self._log("debug", "'after' middleware chain completed", msg_id=msg_id)
 
-        self._log("info", f"Record processing completed successfully", msg_id=msg_id)
+        self._log("info", "Record processing completed successfully", msg_id=msg_id)
         return result
 
     async def _handle_event(self, event: dict, context: Any) -> dict:
@@ -161,7 +184,7 @@ class RecordProcessingMixin:
 
         if self.debug:
             queue_info = f"queue_type={self.queue_type.value}, records={len(records)}"
-            self._log("info", f"Processing event", queue_info=queue_info)
+            self._log("info", "Processing event", queue_info=queue_info)
 
         if self.is_fifo_queue():
             return await self._handle_fifo_event(records, context)
@@ -174,7 +197,7 @@ class RecordProcessingMixin:
 
         self._log(
             "info",
-            f"Processing records in standard queue mode",
+            "Processing records in standard queue mode",
             record_count=len(records),
         )
 
@@ -192,24 +215,24 @@ class RecordProcessingMixin:
                 msg_id = records[i].get("messageId", "UNKNOWN")
                 self._log(
                     "error",
-                    f"Record failed",
+                    "Record failed",
                     msg_id=msg_id,
                     error_type=type(result).__name__,
                     error=str(result),
                 )
                 if self.debug:
                     self._log(
-                        "debug", f"Record failed", msg_id=msg_id, error=str(result)
+                        "debug", "Record failed", msg_id=msg_id, error=str(result)
                     )
                 if self.enable_partial_batch_failure:
                     failures.append({"itemIdentifier": msg_id})
             else:
                 msg_id = records[i].get("messageId", "UNKNOWN")
-                self._log("debug", f"Record succeeded", msg_id=msg_id)
+                self._log("debug", "Record succeeded", msg_id=msg_id)
 
         self._log(
             "info",
-            f"Batch processing completed",
+            "Batch processing completed",
             succeeded=len(records) - len(failures),
             failed=len(failures),
         )
@@ -225,22 +248,22 @@ class RecordProcessingMixin:
         if self.debug:
             self._log(
                 "info",
-                f"FIFO processing",
+                "FIFO processing",
                 record_count=len(records),
                 group_count=len(message_groups),
             )
 
         async def process_group(group_id: str, group_records: List[dict]):
-            group_failures = []
+            group_failures: List[Dict[str, str]] = []
             if self.debug:
                 self._log(
                     "debug",
-                    f"Processing group",
+                    "Processing group",
                     group_id=group_id,
                     record_count=len(group_records),
                 )
 
-            for rec in group_records:
+            for idx, rec in enumerate(group_records):
                 try:
                     await self._handle_record(rec, context)
                 except Exception as e:
@@ -248,13 +271,20 @@ class RecordProcessingMixin:
                     if self.debug:
                         self._log(
                             "error",
-                            f"FIFO record failed",
+                            "FIFO record failed; halting group to preserve ordering",
                             msg_id=msg_id,
                             group_id=group_id,
                             error=str(e),
                         )
+                    # FIFO ordering: a failed message blocks the rest of its
+                    # group. Stop here and report this record plus every record
+                    # after it as failures so SQS redelivers the tail in order.
                     if self.enable_partial_batch_failure:
-                        group_failures.append({"itemIdentifier": msg_id})
+                        group_failures.extend(
+                            {"itemIdentifier": later.get("messageId", "UNKNOWN")}
+                            for later in group_records[idx:]
+                        )
+                    break
 
             return group_failures
 
@@ -271,7 +301,7 @@ class RecordProcessingMixin:
             elif isinstance(result, Exception):
                 if self.debug:
                     self._log(
-                        "error", f"Message group processing failed", error=str(result)
+                        "error", "Message group processing failed", error=str(result)
                     )
 
         return {"batchItemFailures": failures}
@@ -284,7 +314,7 @@ class RecordProcessingMixin:
         except Exception as e:
             self._log(
                 "error",
-                f"Record processing failed",
+                "Record processing failed",
                 msg_id=msg_id,
                 error_type=type(e).__name__,
                 error=str(e),

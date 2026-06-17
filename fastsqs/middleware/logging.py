@@ -46,12 +46,10 @@ class LoggingMiddleware(Middleware):
         self.mask_fields = mask_fields or []
         self.verbose = verbose
 
-        if logger is None:
-            def _default_logger(obj: dict) -> None:
-                print(json.dumps(obj, ensure_ascii=False))
-            self.logger = _default_logger
-        else:
-            self.logger = logger
+        def _default_logger(obj: dict) -> None:
+            print(json.dumps(obj, ensure_ascii=False))
+
+        self.logger: Callable[[dict], None] = logger or _default_logger
 
     def log(self, level: str, message: str, **data) -> None:
         """Log a message with structured data.
@@ -123,8 +121,6 @@ class LoggingMiddleware(Middleware):
             "route_path": ctx.get("route_path", []),
             "message_type": ctx.get("message_type"),
             "handler_result_type": type(ctx.get("handler_result")).__name__ if ctx.get("handler_result") is not None else None,
-            "retry_attempt": ctx.get("retry_attempt", 0),
-            "should_retry": ctx.get("should_retry", False),
         }
 
         if error:

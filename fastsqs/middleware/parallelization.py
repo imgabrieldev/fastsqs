@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Callable, Union
+from typing import Any, Dict, List, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 from .base import Middleware
 
@@ -24,7 +24,7 @@ class ConcurrencyLimiter:
         """
         self.max_concurrent = max_concurrent
         self._semaphore: Optional[asyncio.Semaphore] = None
-        self._loop = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self.active_count = 0
         self.waiting_count = 0
 
@@ -178,13 +178,13 @@ class ParallelizationMiddleware(Middleware):
         msg_id = record.get("messageId", "UNKNOWN")
         start_time = time.time()
         
-        self._log("debug", f"Acquiring concurrency slot", 
+        self._log("debug", "Acquiring concurrency slot", 
                  msg_id=msg_id, current_stats=self.concurrency_limiter.stats)
         
         await self.concurrency_limiter.acquire()
         wait_time = time.time() - start_time
         
-        self._log("debug", f"Concurrency slot acquired", 
+        self._log("debug", "Concurrency slot acquired", 
                  msg_id=msg_id, wait_time=wait_time, new_stats=self.concurrency_limiter.stats)
         
         ctx["concurrency_wait_time"] = wait_time
@@ -196,7 +196,7 @@ class ParallelizationMiddleware(Middleware):
         msg_id = record.get("messageId", "UNKNOWN")
 
         self.concurrency_limiter.release()
-        self._log("debug", f"Concurrency slot released",
+        self._log("debug", "Concurrency slot released",
                  msg_id=msg_id, new_stats=self.concurrency_limiter.stats)
 
     async def run_in_thread_pool(self, func: Callable, *args, **kwargs) -> Any:

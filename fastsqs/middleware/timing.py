@@ -33,7 +33,7 @@ class TimingMsMiddleware(Middleware):
         """
         msg_id = record.get("messageId", "UNKNOWN")
         ctx[self.store_key_start] = time.perf_counter_ns()
-        self._log("debug", f"Processing started", msg_id=msg_id)
+        self._log("debug", "Processing started", msg_id=msg_id)
 
     async def after(self, payload, record, context, ctx, error):
         """Calculate and log processing duration.
@@ -53,5 +53,5 @@ class TimingMsMiddleware(Middleware):
             ctx[self.store_key_ms] = duration_ms
             
             status = "FAILED" if error else "SUCCESS"
-            self._log("info", f"Processing completed", 
+            self._log("info", "Processing completed", 
                      msg_id=msg_id, status=status, duration_ms=duration_ms)

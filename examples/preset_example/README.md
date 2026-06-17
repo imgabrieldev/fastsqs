@@ -6,23 +6,19 @@ This example demonstrates how to use FastSQS middleware presets for quick setup.
 
 ### Production Preset
 ```python
-app.use_preset("production", 
-    dynamodb_table="my-idempotency-table",  # Optional: uses memory store if not provided
-    region_name="us-east-1",                # Optional: uses default region
-    max_concurrent=10,                      # Optional: default is 10
-    retry_attempts=3,                       # Optional: default is 3
-    visibility_timeout=30.0,                # Optional: default is 30.0
-    circuit_breaker_threshold=5             # Optional: default is 5
+app.use_preset("production",
+    max_concurrent=10,            # Optional: default is 10
+    visibility_timeout=30.0,      # Optional: default is 30.0
+    circuit_breaker_threshold=5   # Optional: default is 5
 )
 ```
 
 Includes:
 - LoggingMiddleware
-- TimingMsMiddleware  
-- IdempotencyMiddleware (DynamoDB or Memory)
-- ErrorHandlingMiddleware (with retry + circuit breaker)
+- TimingMsMiddleware
+- ErrorHandlingMiddleware (circuit breaker + dead-letter routing)
 - VisibilityTimeoutMonitor
-- ParallelizationMiddleware
+- ParallelizationMiddleware (thread pool)
 
 ### Development Preset
 ```python
@@ -30,10 +26,9 @@ app.use_preset("development", max_concurrent=5)  # Optional: default is 5
 ```
 
 Includes:
-- LoggingMiddleware
+- LoggingMiddleware (verbose, includes record)
 - TimingMsMiddleware
-- IdempotencyMiddleware (Memory store, 5min TTL)
-- ErrorHandlingMiddleware (2 retries, faster backoff)
+- ErrorHandlingMiddleware
 - VisibilityTimeoutMonitor (relaxed thresholds)
 - ParallelizationMiddleware (no thread pool)
 
@@ -45,7 +40,6 @@ app.use_preset("minimal")
 Includes:
 - LoggingMiddleware
 - TimingMsMiddleware
-- IdempotencyMiddleware (Memory store, 1hr TTL)
 
 ## Usage
 
@@ -54,7 +48,6 @@ Instead of manually configuring each middleware:
 # Before (verbose)
 app.add_middleware(LoggingMiddleware())
 app.add_middleware(TimingMsMiddleware())
-app.add_middleware(IdempotencyMiddleware(...))
 app.add_middleware(ErrorHandlingMiddleware(...))
 # ... more middleware
 ```
@@ -62,5 +55,8 @@ app.add_middleware(ErrorHandlingMiddleware(...))
 Use a preset:
 ```python
 # After (simple)
-app.use_preset("production", dynamodb_table="my-table")
+app.use_preset("production", max_concurrent=15)
 ```
+
+> Retries are not done in-process: SQS redelivers failed messages via the
+> visibility timeout + `maxReceiveCount`, with its own dead-letter queue.

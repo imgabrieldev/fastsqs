@@ -1,61 +1,41 @@
 # Comprehensive FastSQS Example
 
-This example demonstrates all the advanced features of FastSQS v0.3.0:
+This example demonstrates the advanced middleware features of FastSQS.
 
 ## Features Demonstrated
 
-### 1. Idempotency
-- Prevents duplicate message processing
-- Uses memory-based storage (can be switched to DynamoDB)
-- Configurable TTL for idempotency records
-
-### 2. Error Handling & DLQ Management
-- Automatic retry with exponential backoff
+### 1. Error Handling & DLQ Management
 - Circuit breaker pattern for failing handlers
-- Dead Letter Queue management with configurable timeouts
-- Error classification and handling
+- Dead Letter Queue handler for terminal failures
+- Error classification (permanent vs temporary)
 
-### 3. Visibility Timeout Management
+> Retries are **not** performed in-process. SQS already redelivers failed
+> messages via the visibility timeout + `maxReceiveCount`, with its own native
+> dead-letter queue — so the middleware fails fast and lets SQS redeliver.
+
+### 2. Visibility Timeout Management
 - Automatic monitoring of processing time vs visibility timeout
 - Configurable warning thresholds
-- Automatic timeout extension for long-running processes
-- Metrics collection for timeout events
+- Optional timeout-extension callback for long-running processes
 
-### 4. Parallelization
+### 3. Parallelization
 - Concurrent message processing with semaphore-based limiting
 - Thread pool for CPU-intensive tasks
-- Batch processing support with configurable batch sizes
-- Resource pooling and management
+- Optional batch processing with configurable batch sizes
 
 ## Middleware Stack
 
 The example configures a comprehensive middleware stack:
 
-1. **LoggingMiddleware** - Request/response logging
-2. **TimingMiddleware** - Performance timing
-3. **IdempotencyMiddleware** - Duplicate prevention
-4. **ErrorHandlingMiddleware** - Retry logic
-5. **DeadLetterQueueMiddleware** - DLQ management
-6. **VisibilityTimeoutMonitor** - Timeout monitoring
-7. **ProcessingTimeMiddleware** - Processing metrics
-8. **ParallelizationMiddleware** - Concurrency control
+1. **LoggingMiddleware** - Structured logging
+2. **TimingMsMiddleware** - Performance timing
+3. **ErrorHandlingMiddleware** - Circuit breaker + dead-letter routing
+4. **DeadLetterQueueMiddleware** - DLQ management
+5. **VisibilityTimeoutMonitor** - Timeout monitoring
+6. **ProcessingTimeMiddleware** - Processing metrics
+7. **ParallelizationMiddleware** - Concurrency control
 
 ## Usage
-
-### Dependencies
-```bash
-pip install fastsqs[dynamodb]  # For DynamoDB idempotency store
-```
-
-### Environment Variables
-```bash
-# Optional: For DynamoDB idempotency store
-AWS_REGION=us-east-1
-IDEMPOTENCY_TABLE_NAME=fastsqs-idempotency
-
-# Optional: For DLQ management
-DLQ_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789012/my-dlq
-```
 
 ### Local Testing
 ```bash
@@ -64,32 +44,17 @@ python lambda_function.py
 
 ### AWS Lambda Deployment
 1. Package the code with dependencies
-2. Set appropriate IAM permissions for SQS and DynamoDB
-3. Configure SQS trigger with the desired queue
+2. Set appropriate IAM permissions for SQS (and your DLQ)
+3. Configure the SQS trigger with the desired queue
 
 ## Configuration Options
 
-### Idempotency Configuration
+### Error Handling Configuration
 ```python
-# Memory-based (for testing/small workloads)
-store = MemoryIdempotencyStore(ttl_seconds=3600)
-
-# DynamoDB-based (for production)
-store = DynamoDBIdempotencyStore(
-    table_name="idempotency",
-    ttl_seconds=3600,
-    region_name="us-east-1"
-)
-```
-
-### Retry Configuration
-```python
-retry_config = RetryConfig(
-    max_retries=3,
-    base_delay=1.0,
-    max_delay=60.0,
-    backoff_multiplier=2.0,
-    retry_exceptions=[ValueError, ConnectionError]
+circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
+error_middleware = ErrorHandlingMiddleware(
+    circuit_breaker=circuit_breaker,
+    dead_letter_handler=my_dlq_handler,   # optional, sync or async
 )
 ```
 
@@ -105,31 +70,17 @@ config = ParallelizationConfig(
 )
 ```
 
-## Queue Routing
+## Message Routing
 
-The example demonstrates routing to different queues:
+The example routes three event models by their `type` discriminator:
 
-- **order-processing**: Standard order processing with full middleware stack
-- **high-volume-queue**: High-throughput processing with parallelization
-- **critical-queue**: Critical messages with strict timeout monitoring
-
-## Monitoring & Metrics
-
-All middleware components provide statistics that can be logged or sent to monitoring systems:
-
-```python
-stats = {
-    "idempotency_stats": middleware.get_stats(),
-    "retry_stats": error_middleware.get_stats(),
-    "visibility_stats": visibility_monitor.get_stats(),
-    "parallelization_stats": parallel_middleware.get_stats()
-}
-```
+- **order_processing**: Standard order processing with the full middleware stack
+- **high_volume_message**: High-throughput processing with parallelization
+- **critical_message**: Critical messages with strict timeout monitoring
 
 ## Production Considerations
 
-1. **Idempotency Store**: Use DynamoDB for production workloads
-2. **Monitoring**: Integrate with CloudWatch or your monitoring system
-3. **Error Handling**: Configure appropriate DLQ and alerting
-4. **Concurrency**: Tune parallelization based on your workload
-5. **Timeouts**: Configure visibility timeouts based on processing requirements
+1. **Monitoring**: Integrate logging/metrics with CloudWatch or your system
+2. **Error Handling**: Configure an SQS DLQ + alerting; tune the circuit breaker
+3. **Concurrency**: Tune parallelization based on your workload
+4. **Timeouts**: Configure visibility timeouts based on processing requirements

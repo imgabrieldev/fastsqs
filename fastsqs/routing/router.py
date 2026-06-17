@@ -61,7 +61,9 @@ class SQSRouter:
         self._default_handler: Optional[Handler] = None
         self._wildcard_handler: Optional[Handler] = None
 
-        self._pydantic_routes: Dict[str, tuple[Type[BaseModel], Handler]] = {}
+        self._pydantic_routes: Dict[
+            str, tuple[Type[BaseModel], Handler, List[Middleware]]
+        ] = {}
         self._route_lookup: Dict[str, str] = {}
 
     def route(
@@ -107,13 +109,17 @@ class SQSRouter:
 
             primary_type = value.get_message_type()
 
-            def decorator(handler: Handler) -> Handler:
+            def pydantic_decorator(handler: Handler) -> Handler:
                 if primary_type in self._pydantic_routes:
                     raise ValueError(
                         f"Handler for message type '{primary_type}' already exists"
                     )
 
-                self._pydantic_routes[primary_type] = (value, handler)
+                self._pydantic_routes[primary_type] = (
+                    value,
+                    handler,
+                    list(middlewares or []),
+                )
 
                 if self.flexible_matching:
                     variants = value.get_message_type_variants()
@@ -128,46 +134,23 @@ class SQSRouter:
                                 stacklevel=2,
                             )
 
-                # Store middlewares if provided
-                if middlewares:
-                    # Create a wrapper that applies middlewares
-                    original_handler = handler
-
-                    async def middleware_wrapper(msg, ctx):
-                        # Apply middlewares before the handler
-                        for middleware in middlewares:
-                            if hasattr(middleware, "before"):
-                                await middleware.before(msg, ctx)
-
-                        # Call original handler
-                        result = await invoke_handler(original_handler, msg, ctx)
-
-                        # Apply middlewares after the handler
-                        for middleware in reversed(middlewares):
-                            if hasattr(middleware, "after"):
-                                await middleware.after(msg, ctx)
-
-                        return result
-
-                    self._pydantic_routes[primary_type] = (value, middleware_wrapper)
-
                 return handler
 
-            return decorator
+            return pydantic_decorator
 
         # Handle default route (no value)
         if value is None:
 
-            def decorator(fn: Handler) -> Handler:
+            def default_decorator(fn: Handler) -> Handler:
                 self._default_handler = fn
                 return fn
 
-            return decorator
+            return default_decorator
 
         # Handle string/int value routing
         values = [value] if isinstance(value, (str, int)) else list(value)
 
-        def decorator(fn: Handler) -> Handler:
+        def value_decorator(fn: Handler) -> Handler:
             for v in values:
                 k = str(v)
                 if k in self._routes:
@@ -183,11 +166,11 @@ class SQSRouter:
                     )
             return fn
 
-        return decorator
+        return value_decorator
 
     def _find_pydantic_route(
         self, message_type: str
-    ) -> Optional[tuple[Type[BaseModel], Handler]]:
+    ) -> Optional[tuple[Type[BaseModel], Handler, List[Middleware]]]:
         """Find a pydantic route by message type.
         
         Args:
@@ -311,26 +294,28 @@ class SQSRouter:
         if parent_middlewares is None:
             parent_middlewares = []
 
-        # First try pydantic-based routing (using message_type_key)
+        # First try pydantic-based routing (using message_type_key).
+        # Route through _execute_handler so router-level and per-route
+        # middlewares run for pydantic routes exactly as they do for
+        # key-value routes (validation + InvalidMessage handling included).
         message_type = payload.get(self.message_type_key)
         if message_type:
             pydantic_route = self._find_pydantic_route(message_type)
             if pydantic_route:
-                event_model, handler = pydantic_route
-                try:
-                    event_instance = event_model.model_validate(payload)
-                    ctx["message_type"] = message_type
-                    result = await invoke_handler(
-                        handler,
-                        msg=event_instance,
-                        record=record,
-                        context=context,
-                        ctx=ctx,
-                    )
-                    ctx["handler_result"] = result
-                    return True
-                except ValidationError as e:
-                    raise InvalidMessage(f"Validation failed for {message_type}: {e}")
+                event_model, handler, route_middlewares = pydantic_route
+                ctx["message_type"] = message_type
+                await self._execute_handler(
+                    handler,
+                    event_model,
+                    route_middlewares,
+                    payload,
+                    record,
+                    context,
+                    ctx,
+                    root_payload,
+                    parent_middlewares,
+                )
+                return True
 
         # Then try key-value based routing (original logic)
         if self.key not in payload:
@@ -445,7 +430,7 @@ class SQSRouter:
                 try:
                     msg = model.model_validate(payload)
                 except ValidationError as e:
-                    raise ValidationError(f"Validation failed for {self.key}: {e}")
+                    raise InvalidMessage(f"Validation failed for {self.key}: {e}")
             else:
                 sig = inspect.signature(handler)
                 params = list(sig.parameters.values())
@@ -455,34 +440,23 @@ class SQSRouter:
                     try:
                         msg = model_class.model_validate(payload)
                     except ValidationError as e:
-                        raise ValidationError(
+                        raise InvalidMessage(
                             f"Validation failed for {model_class.__name__}: {e}"
                         )
                 else:
                     msg = SQSEvent.model_validate(payload)
 
-            sig = inspect.signature(handler)
-            params = list(sig.parameters.keys())
-
-            if len(params) >= 2 and "ctx" in params[1]:
-                result = await invoke_handler(
-                    handler,
-                    msg=msg,
-                    ctx=ctx,
-                    payload=handler_payload,
-                    record=record,
-                    context=context
-                )
-            else:
-                result = await invoke_handler(
-                    handler,
-                    msg=msg,
-                    payload=handler_payload,
-                    record=record,
-                    context=context,
-                    ctx=ctx
-                )
-
+            # invoke_handler matches kwargs to the handler's signature by name,
+            # so a single call covers every supported handler shape
+            # (msg, ctx, payload, record, context — in any combination/order).
+            result = await invoke_handler(
+                handler,
+                msg=msg,
+                payload=handler_payload,
+                record=record,
+                context=context,
+                ctx=ctx,
+            )
             ctx["handler_result"] = result
 
         except Exception as e:

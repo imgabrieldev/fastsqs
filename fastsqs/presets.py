@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import List
+
 from .middleware import (
-    ErrorHandlingMiddleware, RetryConfig, CircuitBreaker,
+    Middleware,
+    ErrorHandlingMiddleware, CircuitBreaker,
     VisibilityTimeoutMonitor, ParallelizationMiddleware, ParallelizationConfig,
     LoggingMiddleware, TimingMsMiddleware
 )
@@ -15,12 +18,11 @@ class MiddlewarePreset:
     @staticmethod
     def production(
         max_concurrent: int = 10,
-        retry_attempts: int = 3,
         visibility_timeout: float = 30.0,
         circuit_breaker_threshold: int = 5
-    ) -> list:
+    ) -> List[Middleware]:
         """Create production-ready middleware configuration."""
-        middlewares = []
+        middlewares: List[Middleware] = []
 
         middlewares.append(LoggingMiddleware(
             verbose=True,
@@ -29,18 +31,11 @@ class MiddlewarePreset:
         ))
         middlewares.append(TimingMsMiddleware())
 
-        retry_config = RetryConfig(
-            max_retries=retry_attempts,
-            base_delay=1.0,
-            max_delay=60.0,
-            exponential_backoff=True
-        )
         circuit_breaker = CircuitBreaker(
             failure_threshold=circuit_breaker_threshold,
             recovery_timeout=60.0
         )
         middlewares.append(ErrorHandlingMiddleware(
-            retry_config=retry_config,
             circuit_breaker=circuit_breaker
         ))
 
@@ -59,9 +54,9 @@ class MiddlewarePreset:
         return middlewares
 
     @staticmethod
-    def development(max_concurrent: int = 5) -> list:
+    def development(max_concurrent: int = 5) -> List[Middleware]:
         """Create development-friendly middleware configuration."""
-        middlewares = []
+        middlewares: List[Middleware] = []
 
         middlewares.append(LoggingMiddleware(
             verbose=True,
@@ -70,8 +65,7 @@ class MiddlewarePreset:
         ))
         middlewares.append(TimingMsMiddleware())
 
-        retry_config = RetryConfig(max_retries=2, base_delay=0.5)
-        middlewares.append(ErrorHandlingMiddleware(retry_config=retry_config))
+        middlewares.append(ErrorHandlingMiddleware())
 
         middlewares.append(VisibilityTimeoutMonitor(
             default_visibility_timeout=30.0,
@@ -87,7 +81,7 @@ class MiddlewarePreset:
         return middlewares
 
     @staticmethod
-    def minimal() -> list:
+    def minimal() -> List[Middleware]:
         """Create minimal middleware configuration."""
         return [
             LoggingMiddleware(),

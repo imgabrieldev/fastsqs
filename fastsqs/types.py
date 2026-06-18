@@ -49,16 +49,26 @@ class State:
     __slots__ = ("_data",)
 
     def __init__(self, data: Optional[Dict[str, Any]] = None) -> None:
-        # _data is set via object.__setattr__ so __setattr__ below does not
-        # recurse; refactoring this to a plain attribute breaks copy/pickle.
+        # _data is set via object.__setattr__ so __setattr__ below does not recurse.
         object.__setattr__(self, "_data", dict(data or {}))
 
     def __getattr__(self, key: str) -> Any:
-        # Only called on attribute miss (never for _data, which __slots__ owns).
+        # __getattr__ fires on any miss. During copy/pickle reconstruction the
+        # instance is created without __init__ (so _data is unset) and the
+        # machinery probes for _data/__setstate__/etc; guard _data explicitly or
+        # those probes recurse infinitely (self._data -> __getattr__('_data') -> ...).
+        if key == "_data":
+            raise AttributeError(key)
         try:
             return self._data[key]
         except KeyError:
             raise AttributeError(key)
+
+    def __getstate__(self) -> Dict[str, Any]:
+        return self._data
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        object.__setattr__(self, "_data", dict(state))
 
     def __setattr__(self, key: str, value: Any) -> None:
         self._data[key] = value

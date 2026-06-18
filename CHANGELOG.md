@@ -51,7 +51,11 @@ the 0.x surface deliberately to land a clean v1.
 - `LoggingMiddleware` (verbose) logs `ctx.state` keys only — no longer leaks
   framework/scratch internals into CloudWatch.
 - `TimingMsMiddleware` → `TimingMiddleware`.
-- The `FastSQS` constructor is keyword-only.
+- The `FastSQS` constructor is keyword-only. It also accepts `debug` (default
+  `False`) for verbose per-record debug logging via `LoggingMiddleware`.
+- Registering the SAME discriminator value as BOTH a pydantic route and a
+  key-value route now raises `ValueError` at decoration time (previously the
+  key-value handler was silently shadowed and unreachable).
 
 ### Removed (breaking)
 - `FastSQS` constructor params `title` / `description` / `version` (FastAPI
@@ -59,6 +63,8 @@ the 0.x surface deliberately to land a clean v1.
 - `FastSQS.set_queue_type()` (warm-app mutation footgun — set `queue_type` at
   construction) and the `FastSQS.use()` alias (use `add_middleware`).
 - `SQSRouter.wildcard()` (use `default()`) and the unused `SQSRouter.name` param.
+- `SQSRouter`'s `payload_scope` param (it was inert — all modes delivered the
+  same payload; subrouters do not narrow it).
 - Middleware presets: `use_preset`, `MiddlewarePreset`, the `presets` module.
 - `SQSEvent.from_sqs_record` (unused, bypassed validation).
 - The base `Middleware._app` / `_log` coupling (middleware no longer reaches back

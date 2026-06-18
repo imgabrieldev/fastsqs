@@ -18,9 +18,9 @@ real-behavior notes (verified against the source, no library changes):
 - ``invoke_handler`` awaits coroutine results, returns sync results directly,
   and BYPASSES ``select_kwargs`` for an injected handler (passes ALL kwargs so
   fast-depends can resolve the dependency graph).
-- A top-level ``@app.route`` runs with ``payload_scope='root'`` (the default),
-  so the handler ``payload`` kwarg equals the parsed root payload dict, and the
-  ``context`` kwarg is exactly the lambda context object passed through.
+- A top-level ``@app.route`` hands the handler ``payload`` kwarg the parsed root
+  payload dict, and the ``context`` kwarg is exactly the lambda context object
+  passed through.
 - fast-depends caches a shared sub-dependency once per invocation (graph-wide)
   but resolves fresh per record across a batch (no cross-record caching).
 """
@@ -163,7 +163,7 @@ def test_handler_payload_kwarg_equals_root_payload_at_top_level():
     r = SQSTestClient(app).send({"type": "task", "task_id": "1"})
 
     assert r == {"batchItemFailures": []}
-    # payload_scope='root' default -> handler payload == parsed root payload dict.
+    # the handler payload kwarg == the parsed root payload dict.
     assert captured["payload"] == {"type": "task", "task_id": "1"}
 
 

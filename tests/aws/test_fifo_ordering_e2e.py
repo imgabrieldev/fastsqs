@@ -115,13 +115,6 @@ def test_fifo_in_group_order_preserved_single_invocation(aws, pipeline, drain_fu
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason="observing the pre-poison record's echo together with the blocked tail in "
-    "the DLQ depends on the ESM co-batching the whole group into one invocation and on "
-    "per-record echo timing, which a real ESM does not guarantee; the FIFO tail-blocking "
-    "logic is covered deterministically in tests/test_fifo_concurrency_grouping.py.",
-    strict=False,
-)
 def test_fifo_failed_tail_reported_on_first_failure_not_skipped(aws, pipeline, drain, drain_full):
     """FIFO group G = g1(ok), boom-g2(poison), g3, g4 in one group. With
     ``isolate_groups`` fastsqs adds the whole not-yet-processed same-group tail
@@ -156,7 +149,11 @@ def test_fifo_failed_tail_reported_on_first_failure_not_skipped(aws, pipeline, d
     # they must never appear AHEAD of the poison g2 by SequenceNumber as a success
     # path that deleted them: their presence in the DLQ above already proves they
     # were not silently consumed. Here we positively confirm g1 was handled.
-    receipts = _receipts(drain_full, results_url, min_count=1)
+    # Wide non-short-circuiting drain: min_count huge so it waits the full window
+    # and collects EVERY receipt (g1's success echo can lag behind the poison's on
+    # the non-FIFO results queue; a min_count=1 drain would return the poison and
+    # miss g1).
+    receipts = _receipts(drain_full, results_url, min_count=10_000, timeout=150)
     by_id = {}
     for r in receipts:
         by_id.setdefault(r["identifier"], []).append(r)

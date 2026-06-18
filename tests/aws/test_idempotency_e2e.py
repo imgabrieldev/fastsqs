@@ -35,10 +35,11 @@ def _has_identifier(identifier):
 
 @pytest.mark.slow
 @pytest.mark.xfail(
-    reason="observing the exact receive-count progression (1 then 2) of a "
-    "transient-fail-then-succeed record is timing-dependent on a real ESM; the "
-    "redelivery-with-incrementing-ApproximateReceiveCount mechanism is proven "
-    "deterministically by tests/aws/test_visibility_redelivery.py.",
+    reason="the receive-count progression (1 then 2) of a transient-fail-then-succeed "
+    "record is an SQS/ESM platform property (redelivery + incrementing "
+    "ApproximateReceiveCount) that fastsqs only READS — it is not a fastsqs behavior "
+    "and is observable only under --run-aws (timing-dependent on a live ESM). No "
+    "in-process coverage exists or is possible (fastsqs does no in-process retry).",
     strict=False,
 )
 def test_transient_failure_redelivered_and_eventually_succeeds(aws, pipeline, drain_full):

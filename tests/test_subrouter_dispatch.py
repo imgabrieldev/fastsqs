@@ -1,4 +1,4 @@
-"""SQSRouter.subrouter nested dispatch: payload_scope, inherit_middlewares, route_path.
+"""SQSRouter.subrouter nested dispatch: payload threading, inherit_middlewares, route_path.
 
 These pin the public ``subrouter`` surface (instance arg, decorator over a
 pre-built router, decorator over a zero-arg factory) and the nested branches of
@@ -21,8 +21,6 @@ discriminator paths. So a nested miss is genuinely unhandled and the record
 fails; the assertions reflect that true behavior rather than the wishful
 "parent default runs" wording in the original brief.
 """
-
-import pytest
 
 from fastsqs import FastSQS, SQSRouter
 from fastsqs.middleware import Middleware
@@ -141,20 +139,17 @@ def test_subrouter_dispatches_nested_discriminator():
 
 
 # ---------------------------------------------------------------------------
-# payload_scope: which dict reaches the handler's `payload` kwarg
+# Subrouter dispatch delivers the original message to the handler's `payload`
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("scope", ["current", "root", "both"])
-def test_payload_scope_passes_full_message_to_handler(scope):
-    """In a nested key-value dispatch the framework threads the SAME payload dict
-    all the way down (parent.dispatch hands its own ``payload`` to the
-    subrouter), so ``payload`` and ``root_payload`` are the same object. For
-    'current' ``_execute_handler`` uses ``payload``; for 'root'/'both' it uses
-    ``root_payload`` — all three therefore deliver the full original message."""
+def test_subrouter_handler_receives_root_message_as_payload():
+    """A nested key-value dispatch threads the original top-level message all the
+    way down to the leaf handler's ``payload`` kwarg (the subrouter does not
+    narrow it)."""
     captured = {}
 
     parent = SQSRouter(discriminator="type")
-    child = SQSRouter(discriminator="action", payload_scope=scope)
+    child = SQSRouter(discriminator="action")
 
     @child.route("run")
     async def run(payload, ctx):
@@ -170,84 +165,6 @@ def test_payload_scope_passes_full_message_to_handler(scope):
 
     assert result == {"batchItemFailures": []}
     assert captured["payload"] == message
-
-
-def test_payload_scope_current_passes_subpayload_to_handler():
-    captured = {}
-
-    parent = SQSRouter(discriminator="type")
-    child = SQSRouter(discriminator="action", payload_scope="current")
-
-    @child.route("run")
-    async def run(payload, ctx):
-        captured["payload"] = payload
-
-    parent.subrouter("task", child)
-
-    app = FastSQS()
-    app.include_router(parent)
-
-    message = {"type": "task", "action": "run"}
-    result = SQSTestClient(app).send(message)
-
-    assert result == {"batchItemFailures": []}
-    # 'current' uses the `payload` param (the message dict that reached the
-    # subrouter); in this path it is the full original message.
-    assert captured["payload"] == message
-
-
-def test_payload_scope_root_passes_root_payload():
-    captured = {}
-
-    parent = SQSRouter(discriminator="type")
-    child = SQSRouter(discriminator="action", payload_scope="root")  # default
-
-    @child.route("run")
-    async def run(payload, ctx):
-        captured["payload"] = payload
-
-    parent.subrouter("task", child)
-
-    app = FastSQS()
-    app.include_router(parent)
-
-    message = {"type": "task", "action": "run"}
-    result = SQSTestClient(app).send(message)
-
-    assert result == {"batchItemFailures": []}
-    # 'root' uses root_payload, the original top-level message threaded from
-    # _handle_record (payload == root_payload here).
-    assert captured["payload"] == message
-
-
-def test_payload_scope_both_passes_root_payload():
-    captured = {}
-
-    parent = SQSRouter(discriminator="type")
-    child = SQSRouter(discriminator="action", payload_scope="both")
-
-    @child.route("run")
-    async def run(payload, ctx):
-        captured["payload"] = payload
-
-    parent.subrouter("task", child)
-
-    app = FastSQS()
-    app.include_router(parent)
-
-    message = {"type": "task", "action": "run"}
-    result = SQSTestClient(app).send(message)
-
-    assert result == {"batchItemFailures": []}
-    # The 'both' branch also resolves to root_payload per source.
-    assert captured["payload"] == message
-
-
-def test_payload_scope_invalid_value_raises_valueerror():
-    with pytest.raises(ValueError) as exc_info:
-        SQSRouter(payload_scope="bogus")
-    message = str(exc_info.value)
-    assert "current" in message or "root" in message or "both" in message
 
 
 # ---------------------------------------------------------------------------

@@ -15,17 +15,9 @@ Built from direct unit construction of ``State`` and ``Context`` plus a small
 key-value dispatch (``SQSRouter.dispatch`` / ``SQSTestClient``); no AWS, no
 Docker.
 
-CORRECTED CASES — ``State`` copy/pickle are NOT safe on this interpreter
-(Python 3.14): ``State.__slots__`` holds ``_data`` and ``State.__getattr__``
-reads ``self._data`` on any attribute miss. ``copy``/``pickle`` reconstruct the
-instance via ``__newobj__`` WITHOUT running ``__init__`` (so ``_data`` is unset),
-then probe ``hasattr(obj, "__setstate__")``; that lookup misses, calls
-``__getattr__("__setstate__")``, which reads ``self._data`` -> another miss ->
-infinite recursion -> ``RecursionError``. The library docstring claims
-copy/pickle safety, but the real behavior on this interpreter is a
-``RecursionError``, so the round-trip cases assert that instead of a clean
-round-trip (the brief's wishful wording). Source is NOT modified. The del/len/
-repr/Context cases all match the brief exactly.
+``State`` is copy/pickle-safe by design (``__slots__`` + ``__getstate__``/
+``__setstate__`` + a ``_data`` guard in ``__getattr__``), so the round-trip
+cases below assert clean, independent copies.
 """
 
 import asyncio
@@ -61,35 +53,34 @@ class Task(SQSEvent):
 # ---------------------------------------------------------------------------
 
 def test_state_deepcopy_roundtrip():
-    """CORRECTED: the brief expects an independent deep copy, but ``State`` is
-    reconstructed via ``__newobj__`` (``__init__`` skipped, ``_data`` unset) and
-    the ``hasattr(obj, "__setstate__")`` probe drives ``__getattr__`` ->
-    ``self._data`` into infinite recursion, so ``deepcopy`` raises
-    ``RecursionError`` rather than producing a usable copy."""
+    """deepcopy yields an equal but fully independent State (nested values copied)."""
     s = State({"a": 1, "b": [1, 2]})
-    with pytest.raises(RecursionError):
-        copy.deepcopy(s)
+    c = copy.deepcopy(s)
+    assert c._data == s._data
+    assert c._data is not s._data
+    assert c["b"] is not s["b"]
+    c["b"].append(3)
+    assert s["b"] == [1, 2]  # mutating the copy does not touch the original
 
 
-def test_state_shallow_copy_recursion_error():
-    """Adjacent case: ``copy.copy`` fails the same way as ``deepcopy`` — both go
-    through ``__reduce_ex__`` + the ``__setstate__`` probe on an uninitialised
-    instance."""
+def test_state_shallow_copy_roundtrip():
+    """copy.copy yields an equal State with its own top-level _data dict."""
     s = State({"a": 1})
-    with pytest.raises(RecursionError):
-        copy.copy(s)
+    c = copy.copy(s)
+    assert c._data == s._data
+    assert c._data is not s._data
+    c["z"] = 9
+    assert "z" not in s  # the copy's _data is independent at the top level
 
 
 def test_state_pickle_roundtrip():
-    """CORRECTED: the brief expects a pickle round-trip, but ``pickle.loads``
-    reconstructs via ``__newobj__`` and hits the same ``__setstate__`` probe
-    recursion as copy, so unpickling raises ``RecursionError``. (Pickling alone
-    succeeds — the state tuple is ``(None, {'_data': {...}})`` — it is the
-    re-hydration that recurses.)"""
+    """pickle round-trips State to an equal, independent instance."""
     s = State({"k": "v", "n": 3})
-    dumped = pickle.dumps(s)  # dumps is fine; loads recurses
-    with pytest.raises(RecursionError):
-        pickle.loads(dumped)
+    r = pickle.loads(pickle.dumps(s))
+    assert isinstance(r, State)
+    assert r._data == s._data
+    r["k"] = "changed"
+    assert s["k"] == "v"
 
 
 # ---------------------------------------------------------------------------

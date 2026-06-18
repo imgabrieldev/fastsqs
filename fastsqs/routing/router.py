@@ -27,7 +27,6 @@ class SQSRouter:
         base_event_class: Optional[Type[BaseModel]] = None,
         *,
         discriminator: str = "type",
-        payload_scope: str = "root",
         inherit_middlewares: bool = True,
         flexible_matching: bool = False,
     ):
@@ -36,19 +35,11 @@ class SQSRouter:
         Args:
             base_event_class: Optional base event class for validation
             discriminator: Payload key used to route messages (default ``"type"``)
-            payload_scope: Payload scope ('current', 'root', or 'both')
             inherit_middlewares: Whether to inherit parent middlewares
             flexible_matching: Enable fuzzy message-type matching (off by default)
-
-        Raises:
-            ValueError: If payload_scope is not valid
         """
-        if payload_scope not in ("current", "root", "both"):
-            raise ValueError("payload_scope must be 'current', 'root', or 'both'")
-
         self.base_event_class = base_event_class
         self.discriminator = discriminator
-        self.payload_scope = payload_scope
         self.inherit_middlewares = inherit_middlewares
         self.flexible_matching = flexible_matching
 
@@ -109,6 +100,15 @@ class SQSRouter:
                     raise ValueError(
                         f"Handler for message type '{primary_type}' already exists"
                     )
+                # Pydantic routes take dispatch precedence over key-value routes,
+                # so a key-value handler on the same discriminator value would be
+                # unreachable dead code. Fail fast on the cross-registry collision.
+                if primary_type in self._routes:
+                    raise ValueError(
+                        f"'{primary_type}' is already a key-value route; it cannot "
+                        "also be a pydantic route (the key-value handler would be "
+                        "shadowed). Use one routing style per discriminator value."
+                    )
 
                 self._pydantic_routes[primary_type] = (
                     value,
@@ -144,6 +144,12 @@ class SQSRouter:
             injected = maybe_inject(fn)
             for v in values:
                 k = str(v)
+                if k in self._pydantic_routes:
+                    raise ValueError(
+                        f"'{k}' is already a pydantic route; it cannot also be a "
+                        "key-value route (the key-value handler would be shadowed). "
+                        "Use one routing style per discriminator value."
+                    )
                 if k in self._routes:
                     existing = self._routes[k]
                     if existing.handler is not None:
@@ -412,13 +418,7 @@ class SQSRouter:
             InvalidMessageError: If model validation fails
         """
         all_mws = parent_middlewares + self._middlewares + route_middlewares
-
-        if self.payload_scope == "both":
-            handler_payload = root_payload
-        elif self.payload_scope == "current":
-            handler_payload = payload
-        else:  # "root"
-            handler_payload = root_payload
+        handler_payload = root_payload
 
         async def _invoke() -> Any:
             if model is not None:

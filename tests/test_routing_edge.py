@@ -135,6 +135,35 @@ def test_duplicate_route_raises():
             pass
 
 
+def test_pydantic_then_keyvalue_same_discriminator_raises():
+    # Task.get_message_type() == "task"; a key-value route "task" would be
+    # shadowed by the pydantic route (pydantic has dispatch precedence), so it
+    # must fail fast rather than register unreachable dead code.
+    router = SQSRouter()
+
+    @router.route(Task)
+    async def h(msg: Task):
+        pass
+
+    with pytest.raises(ValueError, match="key-value"):
+        @router.route("task")
+        async def kv(msg, ctx):
+            pass
+
+
+def test_keyvalue_then_pydantic_same_discriminator_raises():
+    router = SQSRouter()
+
+    @router.route("task")
+    async def kv(msg, ctx):
+        pass
+
+    with pytest.raises(ValueError, match="pydantic"):
+        @router.route(Task)
+        async def h(msg: Task):
+            pass
+
+
 # ---- base_event_class enforcement on a router ----
 
 def test_base_event_class_enforced():

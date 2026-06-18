@@ -144,6 +144,9 @@ job (visibility timeout + `maxReceiveCount` + redrive policy).
 `max_concurrent_messages` (default 10) bounds concurrency on standard queues;
 FIFO records are processed in order per group.
 
+`debug` (default `False`) enables verbose per-record debug logging through the
+registered `LoggingMiddleware`.
+
 ## Testing
 
 ```python

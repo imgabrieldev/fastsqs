@@ -55,24 +55,24 @@ if __name__ == "__main__":
                 "messageId": "msg-fifo-001",
                 "body": '{"type": "order_created", "order_id": "order-123"}',
                 "attributes": {
-                    "messageGroupId": "customer-001",
-                    "messageDeduplicationId": "dedup-001",
+                    "MessageGroupId": "customer-001",
+                    "MessageDeduplicationId": "dedup-001",
                 },
             },
             {
                 "messageId": "msg-fifo-002",
                 "body": '{"type": "order_updated", "order_id": "order-123"}',
                 "attributes": {
-                    "messageGroupId": "customer-001",
-                    "messageDeduplicationId": "dedup-002",
+                    "MessageGroupId": "customer-001",
+                    "MessageDeduplicationId": "dedup-002",
                 },
             },
             {
                 "messageId": "msg-fifo-003",
                 "body": '{"type": "order_created", "order_id": "order-456"}',
                 "attributes": {
-                    "messageGroupId": "customer-002",
-                    "messageDeduplicationId": "dedup-003",
+                    "MessageGroupId": "customer-002",
+                    "MessageDeduplicationId": "dedup-003",
                 },
             },
         ]

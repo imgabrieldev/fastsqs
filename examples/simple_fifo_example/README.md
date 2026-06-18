@@ -21,7 +21,7 @@ python lambda_function.py
 ## What it demonstrates
 
 - Creating a QueueApp with explicit FIFO queue type
-- Handling FIFO-specific attributes (messageGroupId, messageDeduplicationId)
+- Handling FIFO-specific attributes (MessageGroupId, MessageDeduplicationId)
 - Queue type detection in message handlers
 - Sequential processing within message groups
 

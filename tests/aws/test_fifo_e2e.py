@@ -2,13 +2,16 @@
 (opt-in: ``pytest --run-aws``).
 
 Under ``fifo_failure_mode="isolate_groups"`` (default) with a redrive policy, a
-poison message blocks the rest of ITS messageGroupId on every redelivery, so the
-poison AND its blocked tail share the same receiveCount and BOTH dead-letter at
-maxReceiveCount — the tail never gets a poison-free batch. Messages BEFORE the
-poison in the group succeed, and OTHER message groups are unaffected throughout.
-This is the inherent FIFO+DLQ ordering tradeoff (you cannot skip the poison
-without breaking order). The deployed handler runs with the default mode.
-Harness in conftest.py.
+poison message blocks the rest of ITS messageGroupId, so when the group is
+delivered as one batch the poison AND its blocked tail share the same
+receiveCount and BOTH dead-letter at maxReceiveCount — the tail never gets a
+poison-free batch. Messages BEFORE the poison succeed, and OTHER message groups
+are unaffected. This is the inherent FIFO+DLQ ordering tradeoff.
+
+The whole group is enqueued BEFORE the ESM is enabled (``start_disabled`` +
+``send_message_batch``) so the first poll co-batches it into one invocation —
+the deterministic way to observe tail blocking (a live ESM otherwise does not
+guarantee co-batching). Harness in conftest.py.
 """
 
 import json
@@ -20,20 +23,20 @@ pytestmark = pytest.mark.aws
 
 def test_fifo_poison_and_blocked_tail_dead_letter_other_groups_safe(aws, pipeline, drain):
     sqs = aws["sqs"]
-    main_url, dlq_url = pipeline(fifo=True, max_receive_count=2)
+    main_url, dlq_url, enable = pipeline(fifo=True, max_receive_count=2, start_disabled=True)
 
-    def send(task_id, group):
-        sqs.send_message(
-            QueueUrl=main_url,
-            MessageBody=json.dumps({"type": "task", "task_id": task_id}),
-            MessageGroupId=group,
-        )
-
-    # group A: a1 ok, boom-a2 poison, a3 (blocked tail); group B: b1 ok
-    send("a1", "A")
-    send("boom-a2", "A")
-    send("a3", "A")
-    send("b1", "B")
+    # group A: a1 ok, boom-a2 poison, a3 (blocked tail); group B: b1 ok.
+    # One atomic batch while the ESM is OFF -> the first poll co-batches the group.
+    sqs.send_message_batch(
+        QueueUrl=main_url,
+        Entries=[
+            {"Id": "a1", "MessageBody": json.dumps({"type": "task", "task_id": "a1"}), "MessageGroupId": "A"},
+            {"Id": "a2", "MessageBody": json.dumps({"type": "task", "task_id": "boom-a2"}), "MessageGroupId": "A"},
+            {"Id": "a3", "MessageBody": json.dumps({"type": "task", "task_id": "a3"}), "MessageGroupId": "A"},
+            {"Id": "b1", "MessageBody": json.dumps({"type": "task", "task_id": "b1"}), "MessageGroupId": "B"},
+        ],
+    )
+    enable()
 
     # The poison and its blocked tail both dead-letter (the tail shares the
     # poison's redelivery count and never gets a poison-free batch).

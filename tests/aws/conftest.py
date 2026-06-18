@@ -1,10 +1,14 @@
 """Tier 2 real-AWS e2e harness (opt-in: ``pytest --run-aws``).
 
-Session-scoped: builds a Lambda deployment zip (fastsqs + the e2e handler +
-linux-x86_64 pydantic), creates an IAM execution role and a deployed Lambda
-function. A per-test ``pipeline`` factory wires a main SQS queue + DLQ
-(redrive policy) + an event-source mapping with ReportBatchItemFailures.
-Everything is torn down. Uses the ``gabe`` profile.
+Session-scoped: builds ONE Lambda deployment zip (fastsqs + the e2e handler +
+linux-x86_64 pydantic/fast-depends) and an IAM role, then deploys Lambda
+functions on demand via ``lambda_factory`` — one per distinct env-var config (so
+strict / halt_batch / corrupt / low-concurrency variants reuse the same zip). A
+per-test ``pipeline`` factory wires a main SQS queue + DLQ (redrive policy) + an
+event-source mapping with ReportBatchItemFailures, optionally a results queue for
+the handler's echo side channel. ``drain`` returns raw bodies; ``drain_full``
+returns full message dicts (system + message attributes). Everything is torn
+down. Uses the ``gabe`` profile.
 """
 
 import io
@@ -53,60 +57,104 @@ def _build_zip(tmp: Path) -> bytes:
 
 
 @pytest.fixture(scope="session")
-def deployed_lambda(aws, tmp_path_factory):
-    iam, lam = aws["iam"], aws["lambda"]
-    suffix = uuid.uuid4().hex[:8]
-    role_name = f"fastsqs-e2e-role-{suffix}"
-    fn_name = f"fastsqs-e2e-{suffix}"
+def _exec_role(aws):
+    iam = aws["iam"]
+    role_name = f"fastsqs-e2e-role-{uuid.uuid4().hex[:8]}"
     trust = {"Version": "2012-10-17", "Statement": [
         {"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]}
     perms = {"Version": "2012-10-17", "Statement": [
         {"Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "*"},
-        {"Effect": "Allow", "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "sqs:ChangeMessageVisibility"], "Resource": "*"}]}
-
-    zip_bytes = _build_zip(tmp_path_factory.mktemp("lambda"))
+        {"Effect": "Allow", "Action": [
+            "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes",
+            "sqs:ChangeMessageVisibility", "sqs:SendMessage"], "Resource": "*"}]}
     role_arn = iam.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(trust))["Role"]["Arn"]
     iam.put_role_policy(RoleName=role_name, PolicyName="perms", PolicyDocument=json.dumps(perms))
+    yield role_arn
     try:
+        iam.delete_role_policy(RoleName=role_name, PolicyName="perms")
+        iam.delete_role(RoleName=role_name)
+    except Exception:
+        pass
+
+
+@pytest.fixture(scope="session")
+def _zip_bytes(tmp_path_factory):
+    return _build_zip(tmp_path_factory.mktemp("lambda"))
+
+
+@pytest.fixture(scope="session")
+def lambda_factory(aws, _exec_role, _zip_bytes):
+    """make_fn(env: dict | None) -> function name. Deploys (once, cached per env)
+    a Lambda from the shared zip with the given env vars; tears all down."""
+    lam = aws["lambda"]
+    created: dict = {}
+
+    def make_fn(env: dict | None = None):
+        key = tuple(sorted((env or {}).items()))
+        if key in created:
+            return created[key]
+        fn_name = f"fastsqs-e2e-{uuid.uuid4().hex[:8]}"
         for _ in range(15):  # IAM role propagation
             try:
                 lam.create_function(
                     FunctionName=fn_name, Runtime="python3.13", Architectures=["x86_64"],
-                    Handler="lambda_function.lambda_handler", Role=role_arn,
-                    Code={"ZipFile": zip_bytes}, Timeout=10, MemorySize=256)
+                    Handler="lambda_function.lambda_handler", Role=_exec_role,
+                    Code={"ZipFile": _zip_bytes}, Timeout=10, MemorySize=256,
+                    Environment={"Variables": dict(env or {})})
                 break
             except lam.exceptions.InvalidParameterValueException:
                 time.sleep(3)
         else:
             raise RuntimeError("Lambda did not accept the role in time")
         lam.get_waiter("function_active_v2").wait(FunctionName=fn_name)
-        yield fn_name
-    finally:
+        created[key] = fn_name
+        return fn_name
+
+    yield make_fn
+    for fn in created.values():
         try:
-            lam.delete_function(FunctionName=fn_name)
+            lam.delete_function(FunctionName=fn)
         except Exception:
             pass
-        try:
-            iam.delete_role_policy(RoleName=role_name, PolicyName="perms")
-            iam.delete_role(RoleName=role_name)
-        except Exception:
-            pass
+
+
+@pytest.fixture(scope="session")
+def deployed_lambda(lambda_factory):
+    """The default function (partial_batch_failure=True, isolate_groups)."""
+    return lambda_factory({})
 
 
 @pytest.fixture
 def pipeline(aws, deployed_lambda):
-    """Factory: create a main queue + DLQ + ESM bound to the deployed Lambda.
+    """Factory: main queue + DLQ + ESM bound to a Lambda.
 
-    Returns ``make(fifo=False, max_receive_count=2, visibility=2) -> (main_url, dlq_url)``.
+    make(fifo=False, max_receive_count=2, visibility=10, *, fn=None, results=False,
+         content_dedup=True, batch_size=10, batching_window=0, scaling=None,
+         high_throughput=False, start_disabled=False)
+      -> (main_url, dlq_url[, results_url][, enable]).
+    ``results_url`` is appended when results=True; ``enable`` (a 0-arg callback
+    that enables the ESM and waits) is appended when start_disabled=True — the
+    deterministic co-batch lever: enqueue messages, then call enable() so the
+    first poll grabs them as one batch.
     """
     sqs, lam = aws["sqs"], aws["lambda"]
     queues: list = []
     esms: list = []
 
-    def make(fifo: bool = False, max_receive_count: int = 2, visibility: int = 10):
+    def make(fifo=False, max_receive_count=2, visibility=10, *, fn=None, results=False,
+             content_dedup=True, batch_size=10, batching_window=0, scaling=None,
+             high_throughput=False, start_disabled=False):
+        fn = fn or deployed_lambda
         sfx = uuid.uuid4().hex[:8]
         ext = ".fifo" if fifo else ""
-        fifo_attrs = {"FifoQueue": "true", "ContentBasedDeduplication": "true"} if fifo else {}
+        fifo_attrs: dict = {}
+        if fifo:
+            fifo_attrs["FifoQueue"] = "true"
+            if content_dedup:
+                fifo_attrs["ContentBasedDeduplication"] = "true"
+            if high_throughput:
+                fifo_attrs["FifoThroughputLimit"] = "perMessageGroupId"
+                fifo_attrs["DeduplicationScope"] = "messageGroup"
         dlq_url = sqs.create_queue(QueueName=f"fastsqs-e2e-dlq-{sfx}{ext}", Attributes=dict(fifo_attrs))["QueueUrl"]
         dlq_arn = sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
         main_url = sqs.create_queue(
@@ -115,16 +163,47 @@ def pipeline(aws, deployed_lambda):
                         "RedrivePolicy": json.dumps({"deadLetterTargetArn": dlq_arn, "maxReceiveCount": str(max_receive_count)})},
         )["QueueUrl"]
         main_arn = sqs.get_queue_attributes(QueueUrl=main_url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
-        esm = lam.create_event_source_mapping(
-            EventSourceArn=main_arn, FunctionName=deployed_lambda, Enabled=True,
-            BatchSize=10, FunctionResponseTypes=["ReportBatchItemFailures"])["UUID"]
-        for _ in range(30):
-            if lam.get_event_source_mapping(UUID=esm)["State"] == "Enabled":
-                break
-            time.sleep(2)
+        # Track queues for teardown BEFORE creating the ESM, so a failed
+        # create_event_source_mapping cannot leak them.
         queues.extend([main_url, dlq_url])
+        results_url = None
+        if results:
+            results_url = sqs.create_queue(QueueName=f"fastsqs-e2e-results-{sfx}")["QueueUrl"]
+            queues.append(results_url)
+
+        if fifo:
+            batching_window = 0  # FIFO ESMs reject MaximumBatchingWindowInSeconds
+        esm_kwargs = dict(
+            EventSourceArn=main_arn, FunctionName=fn, Enabled=not start_disabled,
+            BatchSize=batch_size, FunctionResponseTypes=["ReportBatchItemFailures"])
+        if batching_window:
+            esm_kwargs["MaximumBatchingWindowInSeconds"] = batching_window
+        if scaling:
+            esm_kwargs["ScalingConfig"] = {"MaximumConcurrency": scaling}
+        esm = lam.create_event_source_mapping(**esm_kwargs)["UUID"]
         esms.append(esm)
-        return main_url, dlq_url
+
+        def _wait_enabled():
+            for _ in range(30):
+                if lam.get_event_source_mapping(UUID=esm)["State"] == "Enabled":
+                    return
+                time.sleep(2)
+
+        def enable():
+            """Enable the initially-disabled ESM; the first poll co-batches every
+            message already enqueued (deterministic co-batching)."""
+            lam.update_event_source_mapping(UUID=esm, Enabled=True)
+            _wait_enabled()
+
+        if not start_disabled:
+            _wait_enabled()
+
+        parts: list = [main_url, dlq_url]
+        if results:
+            parts.append(results_url)
+        if start_disabled:
+            parts.append(enable)
+        return tuple(parts)
 
     yield make
 
@@ -135,7 +214,7 @@ def pipeline(aws, deployed_lambda):
             pass
     time.sleep(5)  # ESM deletion is async; let it detach before deleting queues
     for url in queues:
-        for _ in range(4):  # retry: delete can race with async ESM detachment
+        for _ in range(4):
             try:
                 sqs.delete_queue(QueueUrl=url)
                 break
@@ -143,21 +222,34 @@ def pipeline(aws, deployed_lambda):
                 time.sleep(3)
 
 
-@pytest.fixture
-def drain(aws):
-    """Return ``drain(url, timeout=120, min_count=1) -> [raw_body, ...]``: poll a
-    queue (e.g. a DLQ) until at least ``min_count`` messages arrive or timeout,
-    deleting them as read (so re-polls don't double-count). Bodies are returned
-    raw (callers parse) so malformed payloads are handled."""
-    def _drain(url, timeout=120, min_count=1):
+def _drainer(sqs, with_attrs):
+    def _drain(url, timeout=120, min_count=1, predicate=None):
         got = []
         deadline = time.time() + timeout
+        kw = {"QueueUrl": url, "MaxNumberOfMessages": 10, "WaitTimeSeconds": 2}
+        if with_attrs:
+            kw["AttributeNames"] = ["All"]
+            kw["MessageAttributeNames"] = ["All"]
         while time.time() < deadline and len(got) < min_count:
-            r = aws["sqs"].receive_message(QueueUrl=url, MaxNumberOfMessages=10, WaitTimeSeconds=2)
+            r = sqs.receive_message(**kw)
             for m in r.get("Messages", []):
-                got.append(m["Body"])
-                aws["sqs"].delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
+                if predicate is None or predicate(m):
+                    got.append(m if with_attrs else m["Body"])
+                sqs.delete_message(QueueUrl=url, ReceiptHandle=m["ReceiptHandle"])
             if len(got) < min_count:
                 time.sleep(1)
         return got
     return _drain
+
+
+@pytest.fixture
+def drain(aws):
+    """drain(url, timeout=120, min_count=1, predicate=None) -> [raw_body, ...]."""
+    return _drainer(aws["sqs"], with_attrs=False)
+
+
+@pytest.fixture
+def drain_full(aws):
+    """drain_full(url, timeout, min_count, predicate) -> [full message dict, ...]
+    including system Attributes and MessageAttributes (delete-as-read)."""
+    return _drainer(aws["sqs"], with_attrs=True)

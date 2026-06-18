@@ -35,6 +35,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "aws: hits real AWS (creates/deletes real resources)"
     )
+    config.addinivalue_line(
+        "markers", "slow: slow/timing-sensitive real-AWS test (still runs under --run-aws)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

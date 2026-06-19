@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 1.0.0 - 2026-06-19
 
 First stable release. fastsqs is now a focused, typed **SQS-on-Lambda router**:
 pydantic routing + dependency injection + a middleware system + native partial

@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.0 - 2026-06-19
+
+### Added
+- `is_sqs_event(event)`: returns `True` when `event` is an SQS batch — a bare
+  list of records (the shape an EventBridge Pipes target receives) or a dict with
+  a `Records` key (the Lambda SQS event source mapping). Lets a multiplexed Lambda
+  route SQS vs non-SQS events (e.g. API Gateway) by shape.
+- `FastSQS.handler` / `async_handler` now accept a bare list of records (the
+  EventBridge Pipes target shape) in addition to `{"Records": [...]}`.
+
+### Fixed
+- A bare-list event containing a **non-dict element** (e.g. a malformed enrichment
+  array item: a JSON string/number/null) no longer crashes the whole batch with an
+  uncaught `AttributeError`. The offending element is reported as its own
+  batch-item failure and its siblings are processed normally.
+- `batchItemFailures` entries are never emitted with an **empty-string or `null`
+  `itemIdentifier`** when a record carries a present-but-empty/`None` `messageId`.
+  SQS/EventBridge read an empty or null identifier as a *whole-batch* failure; all
+  failure paths now coalesce the identifier to the `"UNKNOWN"` sentinel
+  consistently (matching the per-record path).
+
 ## 1.0.0 - 2026-06-19
 
 First stable release. fastsqs is now a focused, typed **SQS-on-Lambda router**:

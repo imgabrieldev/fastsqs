@@ -16,6 +16,7 @@ from .exceptions import (
 )
 from .app import FastSQS
 from .routing import SQSRouter
+from .utils import is_sqs_event
 from .middleware import (
     Middleware,
     TimingMiddleware,
@@ -27,6 +28,7 @@ __all__ = [
     "FastSQS",
     "SQSRouter",
     "SQSEvent",
+    "is_sqs_event",
     "Context",
     "State",
     "FifoInfo",

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from .exceptions import RouteNotFoundError, InvalidMessageError, BatchFailedError
 from .middleware.base import _run_middleware_stack
@@ -18,6 +18,20 @@ from .utils import group_records_by_message_group
 if TYPE_CHECKING:
     from .middleware import Middleware
     from .routing import SQSRouter
+
+
+def _message_id(record: Any) -> str:
+    """Best-effort source ``messageId`` for a ``batchItemFailures`` entry.
+
+    Coalesces an absent OR present-but-empty/``None`` ``messageId`` to the
+    ``"UNKNOWN"`` sentinel, and tolerates a non-dict record. This matters because
+    EventBridge/SQS read an empty-string or ``null`` ``itemIdentifier`` (or an
+    uncaught crash) as a WHOLE-batch failure — so one malformed record must never
+    be able to poison its siblings.
+    """
+    if not isinstance(record, dict):
+        return "UNKNOWN"
+    return record.get("messageId") or record.get("message_id") or "UNKNOWN"
 
 
 class RecordProcessingMixin:
@@ -43,15 +57,20 @@ class RecordProcessingMixin:
         def _log(self, level: str, message: str, **data: Any) -> None: ...
         def _resolve_queue_type(self, records: List[dict]) -> QueueType: ...
 
-    async def _handle_record(self, record: dict, context: Any) -> Optional[Any]:
+    async def _handle_record(self, record: Any, context: Any) -> Optional[Any]:
         """Handle a single SQS record.
 
         Raises:
             InvalidMessageError: If the message body is not a JSON object.
             RouteNotFoundError: If no handler matches the message.
         """
+        if not isinstance(record, dict):
+            # A faithful SQS record is always a JSON object; a non-dict element
+            # (e.g. a malformed enrichment array item) must fail only itself, not
+            # crash the whole batch with an AttributeError out of handler().
+            raise InvalidMessageError("SQS record must be a JSON object")
         body_str = record.get("body", "")
-        msg_id = record.get("messageId") or record.get("message_id") or "UNKNOWN"
+        msg_id = _message_id(record)
 
         self._log("info", "Starting record processing", msg_id=msg_id)
         self._log(
@@ -152,9 +171,13 @@ class RecordProcessingMixin:
         self._log("info", "Record processing completed successfully", msg_id=msg_id)
         return result
 
-    async def _handle_event(self, event: dict, context: Any) -> dict:
-        """Handle an SQS event with multiple records."""
-        records = event.get("Records") or []
+    async def _handle_event(self, event: Union[dict, list], context: Any) -> dict:
+        """Handle an SQS event with multiple records.
+
+        Accepts both Lambda SQS event-source-mapping shape (``{"Records": [...]}``)
+        and a bare list of records (the shape an EventBridge Pipes target receives).
+        """
+        records = event if isinstance(event, list) else (event.get("Records") or [])
         if not isinstance(records, list) or not records:
             return {"batchItemFailures": []}
 
@@ -200,7 +223,7 @@ class RecordProcessingMixin:
 
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                msg_id = records[i].get("messageId", "UNKNOWN")
+                msg_id = _message_id(records[i])
                 self._log(
                     "error",
                     "Record failed",
@@ -214,7 +237,7 @@ class RecordProcessingMixin:
                     )
                 failures.append({"itemIdentifier": msg_id})
             else:
-                msg_id = records[i].get("messageId", "UNKNOWN")
+                msg_id = _message_id(records[i])
                 self._log("debug", "Record succeeded", msg_id=msg_id)
 
         self._log(
@@ -257,7 +280,7 @@ class RecordProcessingMixin:
                 try:
                     await self._handle_record(rec, context)
                 except Exception as e:
-                    msg_id = rec.get("messageId", "UNKNOWN")
+                    msg_id = _message_id(rec)
                     if self.debug:
                         self._log(
                             "error",
@@ -270,7 +293,7 @@ class RecordProcessingMixin:
                     # group. Stop here and report this record plus every record
                     # after it as failures so SQS redelivers the tail in order.
                     group_failures.extend(
-                        {"itemIdentifier": later.get("messageId", "UNKNOWN")}
+                        {"itemIdentifier": _message_id(later)}
                         for later in group_records[idx:]
                     )
                     break
@@ -306,13 +329,13 @@ class RecordProcessingMixin:
         halted = False
         for rec in records:
             if halted:
-                failures.append({"itemIdentifier": rec.get("messageId", "UNKNOWN")})
+                failures.append({"itemIdentifier": _message_id(rec)})
                 continue
             try:
                 await self._handle_record(rec, context)
             except Exception as e:
                 halted = True
-                msg_id = rec.get("messageId", "UNKNOWN")
+                msg_id = _message_id(rec)
                 if self.debug:
                     self._log(
                         "error",
@@ -325,7 +348,7 @@ class RecordProcessingMixin:
 
     async def _handle_record_safe(self, record: dict, context: Any) -> None:
         """Handle a record, logging and re-raising any failure."""
-        msg_id = record.get("messageId", "UNKNOWN")
+        msg_id = _message_id(record)
         try:
             await self._handle_record(record, context)
         except Exception as e:

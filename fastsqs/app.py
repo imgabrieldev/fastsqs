@@ -131,11 +131,12 @@ class FastSQS(RecordProcessingMixin):
                 return QueueType.FIFO
         return QueueType.STANDARD
 
-    def handler(self, event: dict, context: Any) -> dict:
+    def handler(self, event: dict | list, context: Any) -> dict:
         """Main synchronous handler entry point for Lambda.
 
         Args:
-            event: SQS event dictionary
+            event: SQS event — ``{"Records": [...]}`` or a bare list of records
+                (the EventBridge Pipes target shape)
             context: Lambda context object
 
         Returns:
@@ -152,11 +153,12 @@ class FastSQS(RecordProcessingMixin):
             "FastSQS.handler() called inside a running event loop; use async_handler() instead."
         )
 
-    async def async_handler(self, event: dict, context: Any) -> dict:
+    async def async_handler(self, event: dict | list, context: Any) -> dict:
         """Asynchronous handler entry point for testing.
 
         Args:
-            event: SQS event dictionary
+            event: SQS event — ``{"Records": [...]}`` or a bare list of records
+                (the EventBridge Pipes target shape)
             context: Lambda context object
 
         Returns:

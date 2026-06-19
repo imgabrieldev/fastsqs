@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="fastsqs",
-    version="1.0.0",
+    version="1.1.0",
     description="FastAPI-like, lightweight SQS message processing for Python (routing + middleware + dependency injection)",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

@@ -98,6 +98,23 @@ async def invoke_handler(fn: Handler, **kwargs) -> Any:
     return result
 
 
+def is_sqs_event(event: Any) -> bool:
+    """True if ``event`` is an SQS batch this app processes.
+
+    Two shapes count: a bare ``list`` of records (an EventBridge Pipes target
+    receives the batch as a list) or a ``dict`` carrying a ``"Records"`` key (the
+    Lambda SQS event source mapping). Anything else — e.g. an API Gateway proxy
+    event — returns ``False``, so a multiplexed Lambda can route by shape::
+
+        if is_sqs_event(event):
+            return app.handler(event, context)
+        return http_handler(event, context)
+    """
+    if isinstance(event, list):
+        return True
+    return isinstance(event, dict) and "Records" in event
+
+
 async def maybe_await(value: Any) -> Any:
     """Await ``value`` if it is awaitable, else return it as-is.
 

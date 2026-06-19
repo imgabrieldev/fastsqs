@@ -16,12 +16,13 @@ no ``batchItemFailures``, so every co-batched record dead-letters. And under FIF
 ``halt_batch`` the poison plus its entire arrival-tail (across groups) redrive,
 vs ``isolate_groups`` which only blocks the poison's own group.
 
-To force co-batching DETERMINISTICALLY into ONE invocation we create the ESM with
-``start_disabled=True``, enqueue every record with a single ``SendMessageBatch``
-while the ESM is OFF, then call ``enable()`` — so the first poll grabs them all as
-one batch. STANDARD tests also pass ``batching_window=20`` so the ESM waits to
-fill a single batch; FIFO passes no batching_window (auto-guarded to 0, FIFO
-rejects it). Counts stay tiny. Harness in conftest.py.
+To force co-batching DETERMINISTICALLY into ONE invocation we use a FIFO queue
+created with ``start_disabled=True``: enqueue every record with a single
+``SendMessageBatch`` while the ESM is OFF, then call ``enable()`` so the first
+poll grabs the whole group as one batch. (A standard queue scales out pollers and
+splits the records, so it cannot guarantee co-batching — partial_batch_failure /
+timeout / halt_batch are queue-agnostic, so FIFO is a valid, deterministic
+substrate.) Counts stay tiny. Harness in conftest.py.
 """
 
 import json
@@ -54,14 +55,6 @@ def _dlq_ids(drain, dlq_url, min_count, timeout=180):
     return out
 
 
-@pytest.mark.slow
-@pytest.mark.xfail(
-    reason="a real SQS->Lambda ESM does not guarantee co-batching N messages into one "
-    "invocation (it scales pollers and may split the batch), so whole-batch redrive "
-    "cannot be observed deterministically; the partial_batch_failure logic is covered "
-    "in tests/test_batch_semantics.py. xpasses when AWS does co-batch.",
-    strict=False,
-)
 def test_strict_mode_one_poison_redrives_whole_batch(aws, pipeline, lambda_factory, drain):
     """STRICT (partial_batch_failure=False) vs DEFAULT, same co-batched batch.
 
@@ -69,26 +62,28 @@ def test_strict_mode_one_poison_redrives_whole_batch(aws, pipeline, lambda_facto
     the ESM has nothing to delete and redrives the ENTIRE batch, so ok-A, ok-B
     AND boom-C all dead-letter. Default: only boom-C dead-letters; ok-A/ok-B are
     deleted. The delta is exactly the value of ReportBatchItemFailures.
+
+    partial_batch_failure is queue-agnostic, so we run on a FIFO single-group queue
+    purely to get DETERMINISTIC co-batching (start_disabled + one SendMessageBatch
+    -> the first poll grabs the whole group as one invocation; a standard queue
+    would split the records across pollers).
     """
     sqs = aws["sqs"]
 
-    # STRICT pipeline bound to the partial_batch_failure=False function. Created
-    # with start_disabled=True so the SendMessageBatch lands while the ESM is OFF;
-    # enable() then forces the whole batch into ONE invocation. batching_window=20
-    # makes the ESM wait to fill a single batch on that first poll.
+    # STRICT pipeline bound to the partial_batch_failure=False function, FIFO so the
+    # enqueue-before-enable group co-batches deterministically into ONE invocation.
     strict_fn = lambda_factory({"FASTSQS_PARTIAL": "0"})
     strict_main, strict_dlq, strict_enable = pipeline(
-        fifo=False, max_receive_count=1, fn=strict_fn, batching_window=20, start_disabled=True
+        fifo=True, max_receive_count=1, fn=strict_fn, start_disabled=True
     )
     # DEFAULT pipeline (partial_batch_failure=True) as the control.
     ctrl_main, ctrl_dlq, ctrl_enable = pipeline(
-        fifo=False, max_receive_count=1, batching_window=20, start_disabled=True
+        fifo=True, max_receive_count=1, start_disabled=True
     )
 
-    # Single atomic SendMessageBatch per queue while the ESMs are disabled, so all
-    # three records sit in the queue together and the first poll after enable()
-    # coalesces them into one invocation.
-    batch = _entries(["ok-A", "ok-B", "boom-C"])
+    # One atomic SendMessageBatch per queue (single group G) while the ESMs are OFF,
+    # so the first poll after enable() coalesces all three into one invocation.
+    batch = _entries([("ok-A", "G"), ("ok-B", "G"), ("boom-C", "G")])
     sqs.send_message_batch(QueueUrl=strict_main, Entries=batch)
     sqs.send_message_batch(QueueUrl=ctrl_main, Entries=batch)
 
@@ -112,30 +107,25 @@ def test_strict_mode_one_poison_redrives_whole_batch(aws, pipeline, lambda_facto
     )
 
 
-@pytest.mark.slow
-@pytest.mark.xfail(
-    reason="depends on the ESM co-batching the timed-out record with its siblings, "
-    "which a real ESM does not guarantee; whole-batch redrive on function error is an "
-    "AWS contract proven opportunistically here. xpasses when AWS co-batches.",
-    strict=False,
-)
 def test_function_timeout_redrives_whole_cobatched_batch(aws, pipeline, drain):
     """A function timeout is a batch-level event: no return value -> no
     batchItemFailures -> every co-batched record (incl. fast ok-A/ok-B) redrives
     and dead-letters. Extends the single-record timeout test to prove the good
     siblings die too because they were batched with the timed-out record.
+
+    FIFO single-group + start_disabled gives deterministic co-batching (a standard
+    queue would split the records across pollers and defeat the point).
     """
     sqs = aws["sqs"]
-    # start_disabled=True so the SendMessageBatch lands while the ESM is OFF;
-    # batching_window=20 makes the ESM coalesce all three records into ONE
-    # invocation on the first poll, which the 10s Timeout then kills wholesale.
     main_url, dlq_url, enable = pipeline(
-        fifo=False, max_receive_count=1, batching_window=20, start_disabled=True
+        fifo=True, max_receive_count=1, start_disabled=True
     )
 
-    # One SendMessageBatch so sleep-15 + ok-A + ok-B coalesce into one invocation
-    # that the 10s Timeout kills before any return value is produced.
-    sqs.send_message_batch(QueueUrl=main_url, Entries=_entries(["sleep-15", "ok-A", "ok-B"]))
+    # One SendMessageBatch (single group G) so sleep-15 + ok-A + ok-B coalesce into
+    # one invocation that the 10s Timeout kills before any return value is produced.
+    sqs.send_message_batch(
+        QueueUrl=main_url, Entries=_entries([("sleep-15", "G"), ("ok-A", "G"), ("ok-B", "G")])
+    )
 
     # Enable AFTER enqueue: the first poll grabs all three as one batch.
     enable()

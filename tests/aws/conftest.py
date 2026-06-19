@@ -143,7 +143,7 @@ def pipeline(aws, deployed_lambda):
 
     def make(fifo=False, max_receive_count=2, visibility=10, *, fn=None, results=False,
              content_dedup=True, batch_size=10, batching_window=0, scaling=None,
-             high_throughput=False, start_disabled=False):
+             high_throughput=False, start_disabled=False, filter_criteria=None):
         fn = fn or deployed_lambda
         sfx = uuid.uuid4().hex[:8]
         ext = ".fifo" if fifo else ""
@@ -180,6 +180,8 @@ def pipeline(aws, deployed_lambda):
             esm_kwargs["MaximumBatchingWindowInSeconds"] = batching_window
         if scaling:
             esm_kwargs["ScalingConfig"] = {"MaximumConcurrency": scaling}
+        if filter_criteria:
+            esm_kwargs["FilterCriteria"] = filter_criteria
         esm = lam.create_event_source_mapping(**esm_kwargs)["UUID"]
         esms.append(esm)
 

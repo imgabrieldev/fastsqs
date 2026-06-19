@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.1 - 2026-06-19
+
+Docs & packaging only — no code change from 1.1.0.
+
+### Docs
+- Documented the v1.1.0 surface in the README: EventBridge Pipes / bare-list
+  handler + `is_sqs_event`, routers / subrouters / key-value routing + default
+  handler, a "why fastsqs" section, runnable examples, contributing, and accuracy
+  fixes (e.g. the `fast-depends>=3,<4` pin and the PascalCase FIFO-attribute note).
+
+### Packaging
+- Added `project_urls` (Documentation, Changelog, Repository, Issues) so they
+  render in the PyPI sidebar.
+
 ## 1.1.0 - 2026-06-19
 
 ### Added

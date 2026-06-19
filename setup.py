@@ -2,13 +2,19 @@ from setuptools import setup, find_packages
 
 setup(
     name="fastsqs",
-    version="1.1.0",
+    version="1.1.1",
     description="FastAPI-like, lightweight SQS message processing for Python (routing + middleware + dependency injection)",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="Gabriel LaFayette",
     author_email="gabriel.lafayette@proton.me",
     url="https://github.com/imgabrieldev/fastsqs",
+    project_urls={
+        "Documentation": "https://github.com/imgabrieldev/fastsqs#readme",
+        "Changelog": "https://github.com/imgabrieldev/fastsqs/blob/main/CHANGELOG.md",
+        "Repository": "https://github.com/imgabrieldev/fastsqs",
+        "Issues": "https://github.com/imgabrieldev/fastsqs/issues",
+    },
     packages=find_packages(),
     package_data={"fastsqs": ["py.typed"]},
     install_requires=["pydantic>=2.0.0", "fast-depends>=3.0.0,<4.0.0"],

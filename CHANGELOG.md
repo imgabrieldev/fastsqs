@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.2 - 2026-06-20
+
+Docs & packaging only — no code change.
+
+### Packaging
+- Migrated project metadata to **PEP 621**: a full `[project]` table in
+  `pyproject.toml`, and `setup.py` removed (`MANIFEST.in` no longer ships it).
+- Trimmed `build-system.requires` to `["setuptools>=77"]` — dropped the runtime
+  `pydantic` dependency (never used at build time) and the redundant `wheel`
+  (already provided by `setuptools.build_meta`).
+- License now declared as an SPDX expression (`license = "MIT"` +
+  `license-files = ["LICENSE"]`, PEP 639), replacing the legacy
+  `License :: OSI Approved :: MIT License` classifier. Renders the same on PyPI.
+
+### Docs
+- Removed decorative emojis from the README, the `ordering_with_standard_queues`
+  example README, and its handler docstrings for a more conventional OSS tone.
+
 ## 1.1.1 - 2026-06-19
 
 Docs & packaging only — no code change from 1.1.0.

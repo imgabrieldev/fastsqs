@@ -4,17 +4,17 @@ This example demonstrates how to achieve **both ordering and deduplication** wit
 
 ## Key Benefits
 
-### ✅ Deduplication (application-level)
+### Deduplication (application-level)
 - Deduplication is the application's responsibility — e.g. an idempotency-key
   check in your handler (DynamoDB conditional put, Redis SETNX, etc.)
 - fastsqs does not ship an idempotency middleware; it's infra/storage-specific
 
-### ✅ Flexible Ordering
+### Flexible Ordering
 - **Per-entity ordering**: Sequential processing per order/account/user
 - **Cross-entity parallelization**: Different entities process simultaneously  
 - **Custom ordering strategies**: Timestamp-based, priority-based, or business logic
 
-### ✅ High Performance
+### High Performance
 - 100x higher throughput than FIFO queues
 - Optimal resource utilization
 - Lower costs
@@ -47,22 +47,22 @@ else:
 ## Real-World Scenarios
 
 ### E-commerce Order Processing
-- ✅ Order events for same order process sequentially
-- ✅ Different orders process in parallel
-- ✅ No duplicate order confirmations
-- ✅ 100x faster than FIFO
+- Order events for same order process sequentially
+- Different orders process in parallel
+- No duplicate order confirmations
+- 100x faster than FIFO
 
 ### Financial Transactions  
-- ✅ Per-account sequential processing (prevents race conditions)
-- ✅ Cross-account parallel processing
-- ✅ Exactly-once transaction processing
-- ✅ High throughput for payment processing
+- Per-account sequential processing (prevents race conditions)
+- Cross-account parallel processing
+- Exactly-once transaction processing
+- High throughput for payment processing
 
 ### User Account Management
-- ✅ User events process in timestamp order
-- ✅ Different users process simultaneously
-- ✅ No duplicate notifications
-- ✅ Scalable user onboarding
+- User events process in timestamp order
+- Different users process simultaneously
+- No duplicate notifications
+- Scalable user onboarding
 
 ## Performance Comparison
 
@@ -70,9 +70,9 @@ else:
 |----------|------------|---------------------------|
 | **Single Order Processing** | 3k msgs/sec | 300k msgs/sec |
 | **Multiple Orders** | Still 3k msgs/sec total | 300k msgs/sec total |
-| **Duplicate Prevention** | ✅ Built-in | ⚠️ Application-level (idempotency key) |
-| **Ordering** | ✅ Strict FIFO | ✅ Flexible application-level |
-| **Cost** | 💰💰 Higher | 💰 Lower |
+| **Duplicate Prevention** | Built-in | Application-level (idempotency key) |
+| **Ordering** | Strict FIFO | Flexible application-level |
+| **Cost** | Higher | Lower |
 
 ## Usage
 

@@ -20,17 +20,17 @@ own redrive policy, not by bespoke in-app code.
 
 ## Features
 
-- 🚀 **FastAPI-style routing**: `@app.route(OrderCreated)` dispatches by a payload discriminator (default key `"type"`).
-- 🔒 **Pydantic validation**: handlers receive a validated `SQSEvent` model; bad messages become clean batch failures.
-- 💉 **Dependency injection**: declare `Depends(...)` params (powered by `fast-depends`); no `@inject` needed.
-- 🧩 **Typed `Context`**: `ctx.message_id`, `ctx.queue_type`, … as typed attributes; arbitrary scratch in `ctx.state`.
-- 🪝 **Middleware**: `before`/`after` hooks with balanced unwind (resources acquired in `before` are always released).
-- 🦾 **Partial batch failure**: native `ReportBatchItemFailures` for standard and FIFO queues.
-- 🔀 **FIFO-aware**: queue type is inferred from the event-source ARN; per-group ordering with a configurable failure mode.
-- 🔌 **EventBridge Pipes ready**: `app.handler` accepts both the Lambda `{"Records": [...]}` envelope and a bare list of records (the Pipes target shape).
-- 🧭 **Shape detection**: `is_sqs_event(event)` lets one Lambda multiplex SQS and non-SQS (e.g. API Gateway) events.
-- 🧪 **In-process test client**: drive your app with synthetic events, no AWS required.
-- 🐍 **Typed**: ships `py.typed`; full editor/mypy support.
+- **FastAPI-style routing**: `@app.route(OrderCreated)` dispatches by a payload discriminator (default key `"type"`).
+- **Pydantic validation**: handlers receive a validated `SQSEvent` model; bad messages become clean batch failures.
+- **Dependency injection**: declare `Depends(...)` params (powered by `fast-depends`); no `@inject` needed.
+- **Typed `Context`**: `ctx.message_id`, `ctx.queue_type`, … as typed attributes; arbitrary scratch in `ctx.state`.
+- **Middleware**: `before`/`after` hooks with balanced unwind (resources acquired in `before` are always released).
+- **Partial batch failure**: native `ReportBatchItemFailures` for standard and FIFO queues.
+- **FIFO-aware**: queue type is inferred from the event-source ARN; per-group ordering with a configurable failure mode.
+- **EventBridge Pipes ready**: `app.handler` accepts both the Lambda `{"Records": [...]}` envelope and a bare list of records (the Pipes target shape).
+- **Shape detection**: `is_sqs_event(event)` lets one Lambda multiplex SQS and non-SQS (e.g. API Gateway) events.
+- **In-process test client**: drive your app with synthetic events, no AWS required.
+- **Typed**: ships `py.typed`; full editor/mypy support.
 
 ## Install
 

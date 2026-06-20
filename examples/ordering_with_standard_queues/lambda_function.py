@@ -49,10 +49,10 @@ async def handle_order_event(msg: OrderEvent) -> Dict[str, Any]:
     Handle order events with per-order ordering but cross-order parallelization
     
     This achieves:
-    ✅ No duplicates (application-level idempotency)
-    ✅ Per-order sequential processing (application lock)
-    ✅ Cross-order parallel processing (different orders process simultaneously)
-    ✅ High throughput (not limited by FIFO queue constraints)
+    - No duplicates (application-level idempotency)
+    - Per-order sequential processing (application lock)
+    - Cross-order parallel processing (different orders process simultaneously)
+    - High throughput (not limited by FIFO queue constraints)
     """
     
     # Get lock for this specific order (allows other orders to process in parallel)
@@ -84,9 +84,9 @@ async def handle_payment_event(msg: PaymentEvent) -> Dict[str, Any]:
     Handle payment events with per-account ordering
     
     Critical for financial accuracy:
-    ✅ No duplicate transactions (idempotency)
-    ✅ Per-account sequential processing (prevents race conditions)
-    ✅ Cross-account parallel processing (higher throughput)
+    - No duplicate transactions (idempotency)
+    - Per-account sequential processing (prevents race conditions)
+    - Cross-account parallel processing (higher throughput)
     """
     
     # Per-account locking for financial consistency
@@ -117,9 +117,9 @@ async def handle_user_event(msg: UserEvent) -> Dict[str, Any]:
     Handle user events with timestamp-based ordering
     
     Demonstrates flexible ordering strategies:
-    ✅ No duplicates (idempotency)
-    ✅ Timestamp-based processing order
-    ✅ Parallel processing for different users
+    - No duplicates (idempotency)
+    - Timestamp-based processing order
+    - Parallel processing for different users
     """
     
     lock = await get_entity_lock(f"user_{msg.user_id}")

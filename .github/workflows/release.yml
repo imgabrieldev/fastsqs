@@ -1,0 +1,141 @@
+name: release
+
+# Fires ONLY on a pushed semver tag (vX.Y.Z). Normal commits/pushes/PRs and
+# exploratory tags (v-wip, v1.2-beta, ...) do not trigger it. `git push` alone
+# never pushes tags, so a release cannot piggyback on a code push — you must run
+# `git push origin vX.Y.Z` deliberately.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions: {}  # least privilege; each job opts into exactly what it needs
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . -r requirements-dev.txt
+      - name: Run unit suite
+        run: pytest  # integration tests auto-skip without Docker
+
+  build:
+    name: build distributions + release notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history + tags for the release-notes compare link
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify tag matches pyproject version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PKG_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "v$PKG_VERSION" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match pyproject version v$PKG_VERSION — bump pyproject.toml before tagging."
+            exit 1
+          fi
+          echo "version OK: $TAG"
+      - name: Build sdist + wheel and check
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+      # Generated here (not in the release job) so a missing CHANGELOG entry
+      # fails BEFORE the irreversible PyPI publish, never after it.
+      - name: Generate release notes from CHANGELOG
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 <<'PY'
+          import os, re, pathlib
+          tag = os.environ["TAG"]
+          version = tag[1:] if tag.startswith("v") else tag
+          lines = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          start = next((i for i, l in enumerate(lines)
+                        if re.match(rf"^##\s+{re.escape(version)}(?:\s|$|-|\()", l)), None)
+          if start is None:
+              raise SystemExit(f"::error::No CHANGELOG.md section for {version} — add one before tagging.")
+          m = re.search(r"\d{4}-\d{2}-\d{2}", lines[start])
+          date = m.group(0) if m else ""
+          end = next((j for j in range(start + 1, len(lines)) if lines[j].startswith("## ")), len(lines))
+          body = "\n".join(lines[start + 1:end]).strip()
+          header = f"## {tag} ({date})" if date else f"## {tag}"
+          pathlib.Path("notes.md").write_text(f"{header}\n\n{body}\n", encoding="utf-8")
+          PY
+          PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+              "$GITHUB_REPOSITORY" "$PREV" "$TAG" >> notes.md
+          fi
+          echo "----- release notes -----"; cat notes.md
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: notes.md
+          if-no-files-found: error
+
+  pypi-publish:
+    name: publish to PyPI
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC token for PyPI Trusted Publishing (no stored secret)
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: create GitHub release
+    needs: [pypi-publish]  # only after a successful PyPI publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create/update the release
+    steps:
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Idempotent: edit if the release already exists (e.g. a re-run), else create.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md --latest
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --latest --verify-tag
+          fi

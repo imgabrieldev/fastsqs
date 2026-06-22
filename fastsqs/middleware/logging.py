@@ -3,7 +3,7 @@
 import json
 import time
 import traceback
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .base import Middleware
 
@@ -47,7 +47,7 @@ class LoggingMiddleware(Middleware):
 
         self.logger: Callable[[dict], None] = logger or _default_logger
 
-    def log(self, level: str, message: str, **data) -> None:
+    def log(self, level: str, message: str, **data: Any) -> None:
         """Log a message with structured data.
 
         Args:

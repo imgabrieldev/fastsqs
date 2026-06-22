@@ -2,11 +2,12 @@
 __pycache__/
 build/
 dist/
+site/
 *.egg-info/
 *.egg
 *.whl
 *.tar.gz
-docs/
+local-docs/
 .coverage
 htmlcov/
 .vscode/

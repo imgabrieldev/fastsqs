@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.4 - 2026-06-23
+
+Docs only — no code change.
+
+### Docs
+- Redesigned the README header: centered title and tagline, a refreshed badge
+  row (now including monthly downloads, the docs build status, and the
+  Contributor Covenant), and a clearer top-level nav (Documentation, Quickstart,
+  Changelog, Source, Issues).
+
 ## 1.1.3 - 2026-06-22
 
 Docs & packaging only — no behavior change.

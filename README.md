@@ -1,14 +1,29 @@
-# FastSQS
+<div align="center">
 
-**A FastAPI-style router for AWS SQS on Lambda**: pydantic routing, dependency
-injection, a middleware system, and native partial batch failure.
+<h1>FastSQS</h1>
 
-[![PyPI version](https://img.shields.io/pypi/v/fastsqs.svg)](https://pypi.org/project/fastsqs/)
-[![Status](https://img.shields.io/pypi/status/fastsqs.svg)](https://pypi.org/project/fastsqs/)
-[![Python](https://img.shields.io/pypi/pyversions/fastsqs.svg)](https://pypi.org/project/fastsqs/)
-[![License: MIT](https://img.shields.io/pypi/l/fastsqs.svg)](https://github.com/fastsqs/fastsqs/blob/main/LICENSE)
+<strong>A FastAPI-style router for AWS SQS on Lambda</strong>
 
-[Documentation](https://fastsqs.github.io) · [Changelog](https://github.com/fastsqs/fastsqs/blob/main/CHANGELOG.md) · [Source](https://github.com/fastsqs/fastsqs) · [Issues](https://github.com/fastsqs/fastsqs/issues)
+<p>Pydantic routing &middot; dependency injection &middot; middleware &middot; native partial batch failure</p>
+
+<p>
+  <a href="https://pypi.org/project/fastsqs/"><img src="https://img.shields.io/pypi/v/fastsqs.svg?color=2c6fbb" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/fastsqs/"><img src="https://img.shields.io/pypi/pyversions/fastsqs.svg" alt="Supported Python versions"></a>
+  <a href="https://pypi.org/project/fastsqs/"><img src="https://img.shields.io/pypi/dm/fastsqs.svg?color=2c6fbb&label=downloads/month" alt="Downloads per month"></a>
+  <a href="https://github.com/fastsqs/fastsqs/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/fastsqs.svg" alt="License: MIT"></a>
+  <a href="https://github.com/fastsqs/fastsqs/actions/workflows/docs.yml"><img src="https://github.com/fastsqs/fastsqs/actions/workflows/docs.yml/badge.svg" alt="Docs build"></a>
+  <a href="https://github.com/fastsqs/fastsqs/blob/main/CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-2c6fbb.svg" alt="Contributor Covenant 2.1"></a>
+</p>
+
+<p>
+  <a href="https://fastsqs.github.io"><strong>Documentation</strong></a> &middot;
+  <a href="https://fastsqs.github.io/get-started/quickstart/">Quickstart</a> &middot;
+  <a href="https://github.com/fastsqs/fastsqs/blob/main/CHANGELOG.md">Changelog</a> &middot;
+  <a href="https://github.com/fastsqs/fastsqs">Source</a> &middot;
+  <a href="https://github.com/fastsqs/fastsqs/issues">Issues</a>
+</p>
+
+</div>
 
 ---
 
